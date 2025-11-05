@@ -1,0 +1,23 @@
+[project]
+name = "griptape-nodes-library-luma"
+version = "0.1.0"
+description = "Griptape Nodes for Luma Labs Dream Machine API"
+authors = [
+    {name = "Griptape", email = "hello@griptape.ai"}
+]
+readme = "README.md"
+requires-python = "~=3.12"
+dependencies = [
+    "griptape-nodes",
+    "lumaai>=1.5.0",
+    "requests>=2.32.0",
+    "pillow>=10.0.0",
+]
+
+[tool.uv.sources]
+griptape-nodes = { git = "https://github.com/griptape-ai/griptape-nodes", rev="latest"}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+

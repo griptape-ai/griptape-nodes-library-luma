@@ -1,0 +1,75 @@
+{
+    "name": "Luma Labs Library",
+    "library_schema_version": "0.1.0",
+    "settings": [
+        {
+            "description": "API keys required by nodes in this library",
+            "category": "app_events.on_app_initialization_complete",
+            "contents": {
+                "secrets_to_register": [
+                    "LUMAAI_API_KEY"
+                ]
+            }
+        }
+    ],
+    "metadata": {
+        "author": "Griptape",
+        "description": "Griptape Nodes for Luma Labs Dream Machine API - Image and Video Generation",
+        "library_version": "0.1.0",
+        "engine_version": "0.39.0",
+        "tags": [
+            "Griptape",
+            "AI",
+            "Luma Labs",
+            "Dream Machine",
+            "Image Generation",
+            "Video Generation",
+            "Text-to-Image",
+            "Text-to-Video"
+        ],
+        "dependencies": {
+            "pip_dependencies": [
+                "lumaai"
+            ]
+        }
+    },
+    "categories": [
+        {
+            "image/luma": {
+                "color": "border-purple-500",
+                "title": "Image/Luma",
+                "description": "Luma Labs image generation nodes",
+                "icon": "Image"
+            }
+        },
+        {
+            "video/luma": {
+                "color": "border-pink-500",
+                "title": "Video/Luma",
+                "description": "Luma Labs video generation nodes",
+                "icon": "Video"
+            }
+        }
+    ],
+    "nodes": [
+        {
+            "class_name": "LumaImageGeneration",
+            "file_path": "image_generation.py",
+            "metadata": {
+                "category": "image/luma",
+                "description": "Generate high-quality images using Luma Labs Photon models with support for text-to-image, image references, style references, character references, and image modification",
+                "display_name": "Luma Image Generation"
+            }
+        },
+        {
+            "class_name": "LumaVideoGeneration",
+            "file_path": "video_generation.py",
+            "metadata": {
+                "category": "video/luma",
+                "description": "Generate videos using Luma Labs Ray 2 models with text-to-video and image-to-video capabilities",
+                "display_name": "Luma Video Generation"
+            }
+        }
+    ]
+}
+
