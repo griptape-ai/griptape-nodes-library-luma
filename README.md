@@ -12,15 +12,9 @@ This library provides Griptape nodes for interacting with the [Luma Labs Dream M
 
 ## Installation
 
-1. Install the library using `uv`:
+1. Get your API key from [Luma Labs API Keys](https://lumalabs.ai/dream-machine/api/keys)
 
-```bash
-uv pip install -e .
-```
-
-2. Get your API key from [Luma Labs API Keys](https://lumalabs.ai/dream-machine/api/keys)
-
-3. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMAAI_API_KEY`
+2. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMAAI_API_KEY`
 
 ## Nodes
 
