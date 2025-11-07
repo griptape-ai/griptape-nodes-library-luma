@@ -102,7 +102,7 @@ class LumaImageGeneration(ControlNode):
                 tooltip="Optional: Reference image (type determined by Reference Type above)",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageArtifact",
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
                 ui_options={"hide": True},
             )
         )
