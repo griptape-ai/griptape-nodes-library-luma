@@ -44,16 +44,27 @@ Generate videos from text prompts or images with support for:
 - Duration control (5s or 10s)
 - Camera motion controls (pan, tilt, roll, zoom)
 
-### Image Reframe Node
+### Reframe Nodes (Image & Video)
 
-Change aspect ratios and extend images to new dimensions using Luma's Photon models:
-- Convert images between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9, 9:21)
+Change aspect ratios and intelligently extend images or videos to new dimensions:
+
+**Common Features:**
+- Convert between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9, 9:21)
 - Optional text prompt to guide content generation in new areas
-- Model selection: `photon-1` or `photon-flash-1`
 - Advanced parameters for precise control (collapsed by default):
-  - **Grid positioning** (`grid_position_x`, `grid_position_y`): Position the original image within the target canvas
+  - **Grid positioning** (`grid_position_x`, `grid_position_y`): Position the original content within the target canvas
   - **Crop bounds** (`x_start`, `x_end`, `y_start`, `y_end`): Define precise boundaries for the original content
-  - **Resize dimensions** (`resized_width`, `resized_height`): Specify exact dimensions for the original image before placing
+  - **Resize dimensions** (`resized_width`, `resized_height`): Specify exact dimensions for the original content before placing
+
+**Image Reframe:**
+- Uses Luma's Photon models
+- Model selection: `photon-1` or `photon-flash-1`
+- Maximum file size: 10 MB
+
+**Video Reframe:**
+- Uses Luma's Ray models
+- Model selection: `ray-2` (max 10s, higher quality) or `ray-flash-2` (max 30s, faster)
+- Maximum file size: 100 MB
 
 #### Understanding Advanced Reframe Parameters
 
@@ -66,15 +77,6 @@ The advanced parameters give you pixel-level control over how your original imag
 5. **Generated Fill**: Luma AI generates content to fill the remaining areas around your original content
 
 This allows precise control over composition while letting AI intelligently extend your content.
-
-### Video Reframe Node
-
-Change aspect ratios and extend videos to new dimensions using Luma's Ray models:
-- Convert videos between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9, 9:21)
-- Optional text prompt to guide content generation in new areas
-- Model selection: `ray-2` (max 10s, higher quality) or `ray-flash-2` (max 30s, faster)
-- Maximum file size: 100 MB
-- Same advanced parameters as Image Reframe for precise positioning control
 
 ### Video Modify Node
 
