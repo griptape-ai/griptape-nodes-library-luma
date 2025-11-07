@@ -96,6 +96,24 @@
                 "description": "Modify videos with style transfer and prompt-based editing using Luma Labs Ray models. Supports Adhere (subtle), Flex (balanced), and Reimagine (dramatic) modes",
                 "display_name": "Luma Video Modify"
             }
+        },
+        {
+            "class_name": "LumaListConcepts",
+            "file_path": "list_concepts.py",
+            "metadata": {
+                "category": "video/luma",
+                "description": "List all available concepts that can be used in Luma video generation",
+                "display_name": "Luma List Concepts"
+            }
+        },
+        {
+            "class_name": "LumaListCameraMotions",
+            "file_path": "list_camera_motions.py",
+            "metadata": {
+                "category": "video/luma",
+                "description": "List all supported camera motion strings for Luma video generation. These can be used in prompts to control camera movement",
+                "display_name": "Luma List Camera Motions"
+            }
         }
     ]
 }
