@@ -87,6 +87,15 @@
                 "description": "Reframe videos to different aspect ratios using Luma Labs Ray models with optional content steering",
                 "display_name": "Luma Video Reframe"
             }
+        },
+        {
+            "class_name": "LumaVideoModify",
+            "file_path": "video_modify.py",
+            "metadata": {
+                "category": "video/luma",
+                "description": "Modify videos with style transfer and prompt-based editing using Luma Labs Ray models. Supports Adhere (subtle), Flex (balanced), and Reimagine (dramatic) modes",
+                "display_name": "Luma Video Modify"
+            }
         }
     ]
 }
