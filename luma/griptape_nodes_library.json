@@ -69,6 +69,24 @@
                 "description": "Generate videos using Luma Labs Ray 2 models with text-to-video and image-to-video capabilities",
                 "display_name": "Luma Video Generation"
             }
+        },
+        {
+            "class_name": "LumaImageReframe",
+            "file_path": "image_reframe.py",
+            "metadata": {
+                "category": "image/luma",
+                "description": "Reframe images to different aspect ratios using Luma Labs Photon models with optional content steering",
+                "display_name": "Luma Image Reframe"
+            }
+        },
+        {
+            "class_name": "LumaVideoReframe",
+            "file_path": "video_reframe.py",
+            "metadata": {
+                "category": "video/luma",
+                "description": "Reframe videos to different aspect ratios using Luma Labs Ray models with optional content steering",
+                "display_name": "Luma Video Reframe"
+            }
         }
     ]
 }
