@@ -16,7 +16,7 @@ This library provides Griptape nodes for interacting with the [Luma Labs Dream M
 
 2. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMAAI_API_KEY`
 
-Note that the way that the Luma API is implemented means that you must have your Griptpe Nodes Engine configured to use the Griptape Cloud (gtc) storage back end.
+Note that the way that the Luma API is implemented means that you must have your Griptape Nodes Engine configured to use the Griptape Cloud (gtc) storage back end.
 
 ## Nodes
 
