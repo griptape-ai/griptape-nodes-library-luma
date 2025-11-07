@@ -87,28 +87,6 @@ Apply style transfer and prompt-based editing to videos using Luma's Ray models:
 - Optional first frame image to guide the modification
 - Required text prompt to direct the modification
 
-### Utility Nodes
-
-#### List Concepts Node
-
-Fetch all available concepts that can be used in video generation:
-- Returns a list of concept strings (e.g., "handheld")
-- No inputs required - simply run to retrieve the current list
-- Concepts can be used in the Video Generation node to apply specific styles or camera behaviors
-- Useful for discovering what concepts are available for your workflow
-
-**How to use concepts:** Pass concept keys in the video generation node. For example, using the "handheld" concept will apply a handheld camera style to your generated video.
-
-#### List Camera Motions Node
-
-Fetch all supported camera motion strings for video generation:
-- Returns a list of camera motion phrases (e.g., "camera orbit left", "camera zoom in")
-- No inputs required - simply run to retrieve the current list
-- Camera motion strings can be included directly in your video generation prompts
-- Note: While exact strings are guaranteed to work, syntactically similar phrases also work (though there may be occasional mismatches)
-
-**How to use camera motions:** Include camera motion strings in your prompt text. For example, "A beach sunset, camera pan right" or "Mountain landscape, camera orbit left". The model understands these phrases and will apply the corresponding camera movement to the generated video.
-
 #### Modification Modes
 
 The Video Modify node offers 9 modes across three intensity levels, each with three strength variations (1-3):
@@ -140,6 +118,28 @@ Based on the [Luma documentation](https://docs.lumalabs.ai/docs/modify-video):
 - **Swap Environments**: Change backgrounds, locations, time periods, or even weather conditions
 - **Element-Level Editing**: Isolate and modify specific elements like outfits, faces, or props
 - **Add Generative FX**: Layer in smoke, fire, water, and other visual effects
+
+### Utility Nodes
+
+#### List Concepts Node
+
+Fetch all available concepts that can be used in video generation:
+- Returns a list of concept strings (e.g., "handheld")
+- No inputs required - simply run to retrieve the current list
+- Concepts can be used in the Video Generation node to apply specific styles or camera behaviors
+- Useful for discovering what concepts are available for your workflow
+
+**How to use concepts:** Pass concept keys in the video generation node. For example, using the "handheld" concept will apply a handheld camera style to your generated video.
+
+#### List Camera Motions Node
+
+Fetch all supported camera motion strings for video generation:
+- Returns a list of camera motion phrases (e.g., "camera orbit left", "camera zoom in")
+- No inputs required - simply run to retrieve the current list
+- Camera motion strings can be included directly in your video generation prompts
+- Note: While exact strings are guaranteed to work, syntactically similar phrases also work (though there may be occasional mismatches)
+
+**How to use camera motions:** Include camera motion strings in your prompt text. For example, "A beach sunset, camera pan right" or "Mountain landscape, camera orbit left". The model understands these phrases and will apply the corresponding camera movement to the generated video.
 
 ## Documentation
 
