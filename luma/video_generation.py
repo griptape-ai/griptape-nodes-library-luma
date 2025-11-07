@@ -79,7 +79,7 @@ class LumaVideoGeneration(ControlNode):
                 tooltip="Optional: Starting frame image for image-to-video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageArtifact",
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
             )
         )
 
@@ -89,7 +89,7 @@ class LumaVideoGeneration(ControlNode):
                 tooltip="Optional: Ending frame image for controlled video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageArtifact",
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
             )
         )
 
