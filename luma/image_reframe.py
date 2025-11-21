@@ -11,6 +11,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterGroup,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
+    PublicArtifactUrlParameter,
+)
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from lumaai import AsyncLumaAI
@@ -25,12 +28,14 @@ class LumaImageReframe(ControlNode):
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
-        self.add_parameter(
-            Parameter(
+        # Input image with public URL support
+        self._public_input_image_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="input_image",
                 tooltip="Input image to reframe",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                type="ImageArtifact",
+                type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 ui_options={
                     "clickable_file_browser": True,
@@ -40,8 +45,10 @@ class LumaImageReframe(ControlNode):
                         "allow_multiple": False,
                     },
                 },
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the image for reframing.",
         )
+        self._public_input_image_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -185,38 +192,6 @@ class LumaImageReframe(ControlNode):
             )
         return api_key
 
-    def _get_image_url_for_api(
-        self, image_artifact: ImageArtifact | ImageUrlArtifact | None
-    ) -> str | None:
-        """Convert ImageArtifact or ImageUrlArtifact to a public URL for Luma API."""
-        if image_artifact is None:
-            return None
-
-        if isinstance(image_artifact, ImageArtifact):
-            # Save artifact bytes to get public URL
-            image_bytes = image_artifact.to_bytes()
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_reframe_input_{timestamp}.jpg"
-            return GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename
-            )
-
-        elif isinstance(image_artifact, ImageUrlArtifact):
-            url = image_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if "localhost" in url or "127.0.0.1" in url:
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                image_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_reframe_input_{timestamp}.jpg"
-                return GriptapeNodes.StaticFilesManager().save_static_file(
-                    image_bytes, filename
-                )
-            # Public URL - use directly
-            return url
-
-        return None
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -260,21 +235,27 @@ class LumaImageReframe(ControlNode):
             api_key = self._get_api_key()
             client = AsyncLumaAI(auth_token=api_key)
 
+            # Convert serialized dict back to artifact if needed
             input_image = self.get_parameter_value("input_image")
-            if not input_image:
+            if isinstance(input_image, dict) and input_image.get('value'):
+                # Create proper artifact from serialized dict
+                input_image = ImageUrlArtifact(
+                    value=input_image['value'],
+                    name=input_image.get('name', 'input_image')
+                )
+                # Update the parameter with the artifact object
+                self.set_parameter_value("input_image", input_image)
+            
+            # Let PublicArtifactUrlParameter handle getting and converting the artifact
+            image_url = self._public_input_image_parameter.get_public_url_for_parameter()
+            if not image_url:
                 raise ValueError("Input image is required")
 
             model = self.get_parameter_value("model")
             aspect_ratio = self.get_parameter_value("aspect_ratio")
             prompt = self.get_parameter_value("prompt")
 
-            self.append_value_to_parameter("status", "Converting input image...\n")
-
-            # Convert input image to URL
-            image_url = self._get_image_url_for_api(input_image)
-            if not image_url:
-                raise ValueError("Failed to process input image")
-
+            self.append_value_to_parameter("status", f"Using input image: {image_url}\n")
             self.append_value_to_parameter("status", "Creating reframe request...\n")
 
             # Build request parameters
@@ -385,6 +366,7 @@ class LumaImageReframe(ControlNode):
                 value=static_url, name=f"luma_reframe_{timestamp}"
             )
             self.parameter_output_values["output_image"] = image_artifact
+            self.publish_update_to_parameter("output_image", image_artifact)
 
             self.append_value_to_parameter(
                 "status",
@@ -395,6 +377,9 @@ class LumaImageReframe(ControlNode):
             error_msg = f"❌ Reframe failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
+        finally:
+            # Cleanup uploaded artifacts
+            self._public_input_image_parameter.delete_uploaded_artifact()
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""

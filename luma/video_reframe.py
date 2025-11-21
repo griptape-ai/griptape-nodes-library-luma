@@ -11,6 +11,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterGroup,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
+    PublicArtifactUrlParameter,
+)
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from lumaai import AsyncLumaAI
@@ -25,8 +28,10 @@ class LumaVideoReframe(ControlNode):
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
-        self.add_parameter(
-            Parameter(
+        # Input video with public URL support
+        self._public_input_video_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="input_video",
                 tooltip="Input video to reframe (max 10s for ray-2, 30s for ray-flash-2, 100 MB max)",
                 input_types=["VideoUrlArtifact", "UrlArtifact"],
@@ -40,8 +45,10 @@ class LumaVideoReframe(ControlNode):
                         "allow_multiple": False,
                     },
                 },
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the video for reframing.",
         )
+        self._public_input_video_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -185,30 +192,6 @@ class LumaVideoReframe(ControlNode):
             )
         return api_key
 
-    def _get_video_url_for_api(
-        self, video_artifact: VideoUrlArtifact | UrlArtifact | None
-    ) -> str | None:
-        """Convert VideoUrlArtifact or UrlArtifact to a public URL for Luma API."""
-        if video_artifact is None:
-            return None
-
-        # Get the URL from the artifact
-        if isinstance(video_artifact, (VideoUrlArtifact, UrlArtifact)):
-            url = video_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if "localhost" in url or "127.0.0.1" in url:
-                response = requests.get(url, timeout=60)
-                response.raise_for_status()
-                video_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_reframe_input_{timestamp}.mp4"
-                return GriptapeNodes.StaticFilesManager().save_static_file(
-                    video_bytes, filename
-                )
-            # Public URL - use directly
-            return url
-
-        return None
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -252,21 +235,27 @@ class LumaVideoReframe(ControlNode):
             api_key = self._get_api_key()
             client = AsyncLumaAI(auth_token=api_key)
 
+            # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
-            if not input_video:
+            if isinstance(input_video, dict) and input_video.get('value'):
+                # Create proper artifact from serialized dict
+                input_video = VideoUrlArtifact(
+                    value=input_video['value'],
+                    name=input_video.get('name', 'input_video')
+                )
+                # Update the parameter with the artifact object
+                self.set_parameter_value("input_video", input_video)
+            
+            # Let PublicArtifactUrlParameter handle getting and converting the artifact
+            video_url = self._public_input_video_parameter.get_public_url_for_parameter()
+            if not video_url:
                 raise ValueError("Input video is required")
 
             model = self.get_parameter_value("model")
             aspect_ratio = self.get_parameter_value("aspect_ratio")
             prompt = self.get_parameter_value("prompt")
 
-            self.append_value_to_parameter("status", "Converting input video...\n")
-
-            # Convert input video to URL
-            video_url = self._get_video_url_for_api(input_video)
-            if not video_url:
-                raise ValueError("Failed to process input video")
-
+            self.append_value_to_parameter("status", f"Using input video: {video_url}\n")
             self.append_value_to_parameter("status", "Creating reframe request...\n")
 
             # Build request parameters
@@ -371,6 +360,7 @@ class LumaVideoReframe(ControlNode):
 
             video_artifact = VideoUrlArtifact(value=static_url)
             self.parameter_output_values["output_video"] = video_artifact
+            self.publish_update_to_parameter("output_video", video_artifact)
 
             self.append_value_to_parameter(
                 "status",
@@ -381,6 +371,9 @@ class LumaVideoReframe(ControlNode):
             error_msg = f"❌ Reframe failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
+        finally:
+            # Cleanup uploaded artifacts
+            self._public_input_video_parameter.delete_uploaded_artifact()
 
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
