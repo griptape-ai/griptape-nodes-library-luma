@@ -10,6 +10,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
+    PublicArtifactUrlParameter,
+)
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
@@ -96,16 +99,28 @@ class LumaImageGeneration(ControlNode):
             )
         )
 
-        self.add_parameter(
-            Parameter(
+        # Reference image with public URL support
+        self._public_reference_image_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="reference_image",
                 tooltip="Optional: Reference image (type determined by Reference Type above)",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                type="ImageArtifact",
-                allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
-                ui_options={"hide": True},
-            )
+                type="ImageUrlArtifact",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                ui_options={
+                    "clickable_file_browser": True,
+                    "expander": True,
+                    "file_browser_options": {
+                        "extensions": [".png", ".jpg", ".jpeg"],
+                        "allow_multiple": False,
+                    },
+                    "hide": True,
+                },
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the reference image for generation.",
         )
+        self._public_reference_image_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -174,32 +189,6 @@ class LumaImageGeneration(ControlNode):
             )
         return api_key
 
-    def _get_image_url_for_api(self, image_artifact: ImageArtifact | ImageUrlArtifact | None) -> str | None:
-        """Convert ImageArtifact or ImageUrlArtifact to a public URL for Luma API."""
-        if image_artifact is None:
-            return None
-        
-        if isinstance(image_artifact, ImageArtifact):
-            # Save artifact bytes to get public URL
-            image_bytes = image_artifact.to_bytes()
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_ref_{timestamp}.jpg"
-            return GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-        
-        elif isinstance(image_artifact, ImageUrlArtifact):
-            url = image_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if 'localhost' in url or '127.0.0.1' in url:
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                image_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_ref_{timestamp}.jpg"
-                return GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-            # Public URL - use directly
-            return url
-        
-        return None
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -261,51 +250,71 @@ class LumaImageGeneration(ControlNode):
 
             # Add reference image based on selected type
             reference_type = self.get_parameter_value("reference_type")
-            reference_image = self.get_parameter_value("reference_image")
             
-            if reference_type != "none" and reference_image:
-                reference_url = self._get_image_url_for_api(reference_image)
-                if reference_url:
-                    reference_weight = self.get_parameter_value("reference_weight")
+            if reference_type != "none":
+                # Convert serialized dict back to artifact if needed
+                reference_image = self.get_parameter_value("reference_image")
+                
+                # Only process if we have a reference image
+                if not reference_image:
+                    self.append_value_to_parameter(
+                        "status", 
+                        f"⚠️ Reference type set to '{reference_type}' but no reference image provided. Proceeding without reference.\n"
+                    )
+                else:
+                    if isinstance(reference_image, dict) and reference_image.get('value'):
+                        # Create proper artifact from serialized dict
+                        reference_image = ImageUrlArtifact(
+                            value=reference_image['value'],
+                            name=reference_image.get('name', 'reference_image')
+                        )
+                        # Update the parameter with the artifact object
+                        self.set_parameter_value("reference_image", reference_image)
                     
-                    if reference_type == "image_reference":
-                        params["image_ref"] = [
-                            {
+                    # Let PublicArtifactUrlParameter handle getting and converting the artifact
+                    reference_url = self._public_reference_image_parameter.get_public_url_for_parameter()
+                    
+                    if reference_url:
+                        reference_weight = self.get_parameter_value("reference_weight")
+                        
+                        if reference_type == "image_reference":
+                            params["image_ref"] = [
+                                {
+                                    "url": reference_url,
+                                    "weight": reference_weight,
+                                }
+                            ]
+                            self.append_value_to_parameter(
+                                "status", f"Using image reference: {reference_url}\n"
+                            )
+                        
+                        elif reference_type == "style_reference":
+                            params["style_ref"] = [
+                                {
+                                    "url": reference_url,
+                                    "weight": reference_weight,
+                                }
+                            ]
+                            self.append_value_to_parameter(
+                                "status", f"Using style reference: {reference_url}\n"
+                            )
+                        
+                        elif reference_type == "character_reference":
+                            params["character_ref"] = {
+                                "identity0": {"images": [reference_url]}
+                            }
+                            self.append_value_to_parameter(
+                                "status", f"Using character reference: {reference_url}\n"
+                            )
+                        
+                        elif reference_type == "modify_image":
+                            params["modify_image_ref"] = {
                                 "url": reference_url,
                                 "weight": reference_weight,
                             }
-                        ]
-                        self.append_value_to_parameter(
-                            "status", f"Using image reference: {reference_url}\n"
-                        )
-                    
-                    elif reference_type == "style_reference":
-                        params["style_ref"] = [
-                            {
-                                "url": reference_url,
-                                "weight": reference_weight,
-                            }
-                        ]
-                        self.append_value_to_parameter(
-                            "status", f"Using style reference: {reference_url}\n"
-                        )
-                    
-                    elif reference_type == "character_reference":
-                        params["character_ref"] = {
-                            "identity0": {"images": [reference_url]}
-                        }
-                        self.append_value_to_parameter(
-                            "status", f"Using character reference: {reference_url}\n"
-                        )
-                    
-                    elif reference_type == "modify_image":
-                        params["modify_image_ref"] = {
-                            "url": reference_url,
-                            "weight": reference_weight,
-                        }
-                        self.append_value_to_parameter(
-                            "status", f"Modifying image: {reference_url}\n"
-                        )
+                            self.append_value_to_parameter(
+                                "status", f"Modifying image: {reference_url}\n"
+                            )
 
             # Create generation
             generation = await client.generations.image.create(**params)
@@ -366,6 +375,7 @@ class LumaImageGeneration(ControlNode):
                 value=static_url, name=f"luma_photon_{timestamp}"
             )
             self.parameter_output_values["image"] = image_artifact
+            self.publish_update_to_parameter("image", image_artifact)
 
             self.append_value_to_parameter(
                 "status",
@@ -376,6 +386,9 @@ class LumaImageGeneration(ControlNode):
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
+        finally:
+            # Cleanup uploaded artifacts
+            self._public_reference_image_parameter.delete_uploaded_artifact()
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""

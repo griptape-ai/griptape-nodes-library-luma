@@ -10,6 +10,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
+    PublicArtifactUrlParameter,
+)
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from lumaai import AsyncLumaAI
@@ -73,25 +76,33 @@ class LumaVideoGeneration(ControlNode):
             )
         )
 
-        self.add_parameter(
-            Parameter(
+        # Start frame with public URL support
+        self._public_start_frame_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="start_frame",
                 tooltip="Optional: Starting frame image for image-to-video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                type="ImageArtifact",
+                type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the image for video generation.",
         )
+        self._public_start_frame_parameter.add_input_parameters()
 
-        self.add_parameter(
-            Parameter(
+        # End frame with public URL support
+        self._public_end_frame_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="end_frame",
                 tooltip="Optional: Ending frame image for controlled video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                type="ImageArtifact",
+                type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the image for video generation.",
         )
+        self._public_end_frame_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -135,32 +146,6 @@ class LumaVideoGeneration(ControlNode):
             )
         return api_key
 
-    def _get_image_url_for_api(self, image_artifact: ImageArtifact | ImageUrlArtifact | None) -> str | None:
-        """Convert ImageArtifact or ImageUrlArtifact to a public URL for Luma API."""
-        if image_artifact is None:
-            return None
-        
-        if isinstance(image_artifact, ImageArtifact):
-            # Save artifact bytes to get public URL
-            image_bytes = image_artifact.to_bytes()
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_frame_{timestamp}.jpg"
-            return GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-        
-        elif isinstance(image_artifact, ImageUrlArtifact):
-            url = image_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if 'localhost' in url or '127.0.0.1' in url:
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                image_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_frame_{timestamp}.jpg"
-                return GriptapeNodes.StaticFilesManager().save_static_file(image_bytes, filename)
-            # Public URL - use directly
-            return url
-        
-        return None
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -233,19 +218,36 @@ class LumaVideoGeneration(ControlNode):
 
             # Build keyframes if start or end frame provided
             keyframes = {}
+            
+            # Add optional start and end frames
             start_frame = self.get_parameter_value("start_frame")
-            end_frame = self.get_parameter_value("end_frame")
-
             if start_frame:
-                start_frame_url = self._get_image_url_for_api(start_frame)
+                # Convert serialized dicts back to artifacts if needed
+                if isinstance(start_frame, dict) and start_frame.get('value'):
+                    start_frame = ImageUrlArtifact(
+                        value=start_frame['value'],
+                        name=start_frame.get('name', 'start_frame')
+                    )
+                    self.set_parameter_value("start_frame", start_frame)
+                
+                start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
                 if start_frame_url:
                     keyframes["frame0"] = {"type": "image", "url": start_frame_url}
                     self.append_value_to_parameter(
                         "status", f"Using start frame: {start_frame_url}\n"
                     )
 
+            end_frame = self.get_parameter_value("end_frame")
             if end_frame:
-                end_frame_url = self._get_image_url_for_api(end_frame)
+                # Convert serialized dicts back to artifacts if needed
+                if isinstance(end_frame, dict) and end_frame.get('value'):
+                    end_frame = ImageUrlArtifact(
+                        value=end_frame['value'],
+                        name=end_frame.get('name', 'end_frame')
+                    )
+                    self.set_parameter_value("end_frame", end_frame)
+                
+                end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
                 if end_frame_url:
                     keyframes["frame1"] = {"type": "image", "url": end_frame_url}
                     self.append_value_to_parameter(
@@ -312,6 +314,7 @@ class LumaVideoGeneration(ControlNode):
 
             video_artifact = VideoUrlArtifact(value=static_url)
             self.parameter_output_values["video"] = video_artifact
+            self.publish_update_to_parameter("video", video_artifact)
 
             self.append_value_to_parameter(
                 "status",
@@ -322,6 +325,10 @@ class LumaVideoGeneration(ControlNode):
             error_msg = f"❌ Generation failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
+        finally:
+            # Cleanup uploaded artifacts
+            self._public_start_frame_parameter.delete_uploaded_artifact()
+            self._public_end_frame_parameter.delete_uploaded_artifact()
 
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""

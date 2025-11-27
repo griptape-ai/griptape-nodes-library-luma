@@ -10,6 +10,9 @@ from griptape_nodes.exe_types.core_types import (
     ParameterTypeBuiltin,
 )
 from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
+    PublicArtifactUrlParameter,
+)
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from lumaai import AsyncLumaAI
@@ -24,8 +27,10 @@ class LumaVideoModify(ControlNode):
     def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
-        self.add_parameter(
-            Parameter(
+        # Input video with public URL support
+        self._public_input_video_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="input_video",
                 tooltip="Input video to modify (max 10s for ray-2, 15s for ray-flash-2, 100 MB max)",
                 input_types=["VideoUrlArtifact", "UrlArtifact"],
@@ -39,8 +44,10 @@ class LumaVideoModify(ControlNode):
                         "allow_multiple": False,
                     },
                 },
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the video for modification.",
         )
+        self._public_input_video_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -93,12 +100,14 @@ class LumaVideoModify(ControlNode):
             )
         )
 
-        self.add_parameter(
-            Parameter(
+        # First frame with public URL support
+        self._public_first_frame_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
                 name="first_frame",
                 tooltip="Optional: First frame image to guide the modification",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
-                type="ImageArtifact",
+                type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 ui_options={
                     "clickable_file_browser": True,
@@ -108,8 +117,10 @@ class LumaVideoModify(ControlNode):
                         "allow_multiple": False,
                     },
                 },
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the first frame image for video modification.",
         )
+        self._public_first_frame_parameter.add_input_parameters()
 
         self.add_parameter(
             Parameter(
@@ -142,62 +153,6 @@ class LumaVideoModify(ControlNode):
             )
         return api_key
 
-    def _get_video_url_for_api(
-        self, video_artifact: VideoUrlArtifact | UrlArtifact | None
-    ) -> str | None:
-        """Convert VideoUrlArtifact or UrlArtifact to a public URL for Luma API."""
-        if video_artifact is None:
-            return None
-
-        if isinstance(video_artifact, (VideoUrlArtifact, UrlArtifact)):
-            url = video_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if "localhost" in url or "127.0.0.1" in url:
-                response = requests.get(url, timeout=60)
-                response.raise_for_status()
-                video_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_modify_input_{timestamp}.mp4"
-                return GriptapeNodes.StaticFilesManager().save_static_file(
-                    video_bytes, filename
-                )
-            # Public URL - use directly
-            return url
-
-        return None
-
-    def _get_image_url_for_api(
-        self, image_artifact: ImageArtifact | ImageUrlArtifact | None
-    ) -> str | None:
-        """Convert ImageArtifact or ImageUrlArtifact to a public URL for Luma API."""
-        if image_artifact is None:
-            return None
-
-        if isinstance(image_artifact, ImageArtifact):
-            # Save artifact bytes to get public URL
-            image_bytes = image_artifact.to_bytes()
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_modify_frame_{timestamp}.jpg"
-            return GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename
-            )
-
-        elif isinstance(image_artifact, ImageUrlArtifact):
-            url = image_artifact.value
-            # Check if localhost URL - needs conversion to public URL
-            if "localhost" in url or "127.0.0.1" in url:
-                response = requests.get(url, timeout=30)
-                response.raise_for_status()
-                image_bytes = response.content
-                timestamp = int(time.time() * 1000)
-                filename = f"luma_modify_frame_{timestamp}.jpg"
-                return GriptapeNodes.StaticFilesManager().save_static_file(
-                    image_bytes, filename
-                )
-            # Public URL - use directly
-            return url
-
-        return None
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
@@ -247,8 +202,20 @@ class LumaVideoModify(ControlNode):
             api_key = self._get_api_key()
             client = AsyncLumaAI(auth_token=api_key)
 
+            # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
-            if not input_video:
+            if isinstance(input_video, dict) and input_video.get('value'):
+                # Create proper artifact from serialized dict
+                input_video = VideoUrlArtifact(
+                    value=input_video['value'],
+                    name=input_video.get('name', 'input_video')
+                )
+                # Update the parameter with the artifact object
+                self.set_parameter_value("input_video", input_video)
+            
+            # Let PublicArtifactUrlParameter handle getting and converting the artifact
+            video_url = self._public_input_video_parameter.get_public_url_for_parameter()
+            if not video_url:
                 raise ValueError("Input video is required")
 
             prompt = self.get_parameter_value("prompt")
@@ -257,15 +224,8 @@ class LumaVideoModify(ControlNode):
 
             model = self.get_parameter_value("model")
             mode = self.get_parameter_value("mode")
-            first_frame = self.get_parameter_value("first_frame")
 
-            self.append_value_to_parameter("status", "Converting input video...\n")
-
-            # Convert input video to URL
-            video_url = self._get_video_url_for_api(input_video)
-            if not video_url:
-                raise ValueError("Failed to process input video")
-
+            self.append_value_to_parameter("status", f"Using input video: {video_url}\n")
             self.append_value_to_parameter("status", "Creating modification request...\n")
 
             # Build request parameters
@@ -285,9 +245,17 @@ class LumaVideoModify(ControlNode):
             )
 
             # Add optional first frame
+            first_frame = self.get_parameter_value("first_frame")
             if first_frame:
-                self.append_value_to_parameter("status", "Converting first frame...\n")
-                first_frame_url = self._get_image_url_for_api(first_frame)
+                # Convert serialized dict back to artifact if needed
+                if isinstance(first_frame, dict) and first_frame.get('value'):
+                    first_frame = ImageUrlArtifact(
+                        value=first_frame['value'],
+                        name=first_frame.get('name', 'first_frame')
+                    )
+                    self.set_parameter_value("first_frame", first_frame)
+                
+                first_frame_url = self._public_first_frame_parameter.get_public_url_for_parameter()
                 if first_frame_url:
                     params["first_frame"] = {"url": first_frame_url}
                     self.append_value_to_parameter(
@@ -351,6 +319,7 @@ class LumaVideoModify(ControlNode):
 
             video_artifact = VideoUrlArtifact(value=static_url)
             self.parameter_output_values["output_video"] = video_artifact
+            self.publish_update_to_parameter("output_video", video_artifact)
 
             self.append_value_to_parameter(
                 "status",
@@ -361,6 +330,10 @@ class LumaVideoModify(ControlNode):
             error_msg = f"❌ Modification failed: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
+        finally:
+            # Cleanup uploaded artifacts
+            self._public_input_video_parameter.delete_uploaded_artifact()
+            self._public_first_frame_parameter.delete_uploaded_artifact()
 
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
