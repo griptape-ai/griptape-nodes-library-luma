@@ -19,13 +19,12 @@ This library provides Griptape nodes for interacting with the [Luma Labs Dream M
 
 2. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMAAI_API_KEY`
 
-Note that the way that the Luma API is implemented means that you must have your Griptape Nodes Engine configured to use the Griptape Cloud (gtc) storage back end.
-
 ## Nodes
 
 ### Image Generation Node
 
 Generate images from text prompts with support for:
+
 - Text-to-image generation
 - Image references with configurable weight
 - Style references
@@ -37,6 +36,7 @@ Generate images from text prompts with support for:
 ### Video Generation Node
 
 Generate videos from text prompts or images with support for:
+
 - Text-to-video generation
 - Image-to-video generation with start and end frames
 - Ray 2, Ray 2 Flash, and Ray 1.6 models
@@ -49,6 +49,7 @@ Generate videos from text prompts or images with support for:
 Change aspect ratios and intelligently extend images or videos to new dimensions:
 
 **Common Features:**
+
 - Convert between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9, 9:21)
 - Optional text prompt to guide content generation in new areas
 - Advanced parameters for precise control (collapsed by default):
@@ -57,11 +58,13 @@ Change aspect ratios and intelligently extend images or videos to new dimensions
   - **Resize dimensions** (`resized_width`, `resized_height`): Specify exact dimensions for the original content before placing
 
 **Image Reframe:**
+
 - Uses Luma's Photon models
 - Model selection: `photon-1` or `photon-flash-1`
 - Maximum file size: 10 MB
 
 **Video Reframe:**
+
 - Uses Luma's Ray models
 - Model selection: `ray-2` (max 10s, higher quality) or `ray-flash-2` (max 30s, faster)
 - Maximum file size: 100 MB
@@ -81,6 +84,7 @@ This allows precise control over composition while letting AI intelligently exte
 ### Video Modify Node
 
 Apply style transfer and prompt-based editing to videos using Luma's Ray models:
+
 - Transform video style, appearance, and content while preserving motion
 - Model selection: `ray-2` (max 10s) or `ray-flash-2` (max 15s)
 - Maximum file size: 100 MB
@@ -92,18 +96,21 @@ Apply style transfer and prompt-based editing to videos using Luma's Ray models:
 The Video Modify node offers 9 modes across three intensity levels, each with three strength variations (1-3):
 
 **Adhere Modes (adhere_1, adhere_2, adhere_3)**
+
 - The output adheres very closely to the source video
 - Ideal for subtle enhancements, minor retexturing, or applying light stylistic filters
 - Best for: Preserving original content while making minimal changes
 - Example use: Color grading, subtle texture changes, gentle aesthetic adjustments
 
 **Flex Modes (flex_1, flex_2, flex_3)**
+
 - The output flexibly adheres to shapes, characters, and details of the source video
 - Allows significant stylistic changes while maintaining recognizable elements
 - Best for: Balanced transformations that keep the essence of the original
 - Example use: Style transfer (live-action to animation), wardrobe changes, prop modifications
 
 **Reimagine Modes (reimagine_1, reimagine_2, reimagine_3)**
+
 - The output adheres much more loosely to the source video
 - Best for fundamentally changing the world, style, and transforming content into entirely new forms
 - Best for: Dramatic transformations, complete style overhauls
@@ -124,6 +131,7 @@ Based on the [Luma documentation](https://docs.lumalabs.ai/docs/modify-video):
 #### List Concepts Node
 
 Fetch all available concepts that can be used in video generation:
+
 - Returns a list of concept strings (e.g., "handheld")
 - No inputs required - simply run to retrieve the current list
 - Concepts can be used in the Video Generation node to apply specific styles or camera behaviors
@@ -134,6 +142,7 @@ Fetch all available concepts that can be used in video generation:
 #### List Camera Motions Node
 
 Fetch all supported camera motion strings for video generation:
+
 - Returns a list of camera motion phrases (e.g., "camera orbit left", "camera zoom in")
 - No inputs required - simply run to retrieve the current list
 - Camera motion strings can be included directly in your video generation prompts
@@ -144,6 +153,7 @@ Fetch all supported camera motion strings for video generation:
 ## Documentation
 
 For detailed API documentation, visit:
+
 - [Image Generation API](https://docs.lumalabs.ai/docs/python-image-generation)
 - [Video Generation API](https://docs.lumalabs.ai/docs/python-video-generation)
 - [Reframe API](https://docs.lumalabs.ai/docs/reframe-video-image)
@@ -152,4 +162,3 @@ For detailed API documentation, visit:
 ## License
 
 See LICENSE file for details.
-
