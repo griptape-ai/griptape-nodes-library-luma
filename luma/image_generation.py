@@ -374,8 +374,7 @@ class LumaImageGeneration(ControlNode):
             image_artifact = ImageUrlArtifact(
                 value=static_url, name=f"luma_photon_{timestamp}"
             )
-            self.parameter_output_values["image"] = image_artifact
-            self.publish_update_to_parameter("image", image_artifact)
+            self.set_parameter_value("image", image_artifact)
 
             self.append_value_to_parameter(
                 "status",
