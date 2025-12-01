@@ -40,8 +40,11 @@ Generate videos from text prompts or images with support for:
 - Text-to-video generation
 - Image-to-video generation with start and end frames
 - Ray 2, Ray 2 Flash, and Ray 1.6 models
-- Multiple resolutions (540p, 720p, 1080p, 4k)
-- Duration control (5s or 10s)
+- Multiple resolutions (540p, 720p, 1080p, 4k) for ray-2 and ray-flash-2
+- Duration control (5s or 9s) for ray-2 and ray-flash-2
+- Aspect ratios:
+  - ray-1-6: 16:9, 9:16, 1:1
+  - ray-2 and ray-flash-2: 1:1, 3:4, 4:3, 9:16, 16:9, 9:21, 21:9
 - Camera motion controls (pan, tilt, roll, zoom)
 
 ### Reframe Nodes (Image & Video)

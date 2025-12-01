@@ -52,6 +52,52 @@ class LumaVideoGeneration(ControlNode):
             )
         )
 
+        # Aspect ratio parameter for ray-1-6 (limited options)
+        self.add_parameter(
+            Parameter(
+                name="aspect_ratio_ray16",
+                tooltip="Video aspect ratio for ray-1-6 model",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="16:9",
+                traits={
+                    Options(
+                        choices=[
+                            "1:1",
+                            "9:16",
+                            "16:9",
+                        ]
+                    )
+                },
+                ui_options={"display_name": "Aspect Ratio", "hide": True},
+            )
+        )
+
+        # Aspect ratio parameter for ray-2 and ray-flash-2 (all options)
+        self.add_parameter(
+            Parameter(
+                name="aspect_ratio",
+                tooltip="Video aspect ratio for ray-2 and ray-flash-2 models",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="16:9",
+                traits={
+                    Options(
+                        choices=[
+                            "1:1",
+                            "3:4",
+                            "4:3",
+                            "9:16",
+                            "16:9",
+                            "9:21",
+                            "21:9",
+                        ]
+                    )
+                },
+                ui_options={"display_name": "Aspect Ratio"},
+            )
+        )
+
         self.add_parameter(
             Parameter(
                 name="resolution",
@@ -71,7 +117,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="5s",
-                traits={Options(choices=["5s", "10s"])},
+                traits={Options(choices=["5s", "9s"])},
                 ui_options={"display_name": "Duration"},
             )
         )
@@ -136,6 +182,21 @@ class LumaVideoGeneration(ControlNode):
             )
         )
 
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        """Update parameter visibility when model changes."""
+        if parameter.name == "model":
+            if value == "ray-1-6":
+                # Hide duration and resolution parameters for ray-1-6 (doesn't support them)
+                self.hide_parameter_by_name(["duration", "resolution"])
+                # Show ray-1-6 aspect ratio, hide general aspect ratio
+                self.show_parameter_by_name(["aspect_ratio_ray16"])
+                self.hide_parameter_by_name(["aspect_ratio"])
+            else:
+                # Show all parameters for ray-2 and ray-flash-2
+                self.show_parameter_by_name(["duration", "resolution", "aspect_ratio"])
+                # Hide ray-1-6 aspect ratio
+                self.hide_parameter_by_name(["aspect_ratio_ray16"])
+
     def _get_api_key(self) -> str:
         """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
@@ -194,6 +255,11 @@ class LumaVideoGeneration(ControlNode):
                 raise ValueError("Prompt is required and cannot be empty")
 
             model = self.get_parameter_value("model")
+            # Get the appropriate aspect_ratio parameter based on model
+            if model == "ray-1-6":
+                aspect_ratio = self.get_parameter_value("aspect_ratio_ray16")
+            else:
+                aspect_ratio = self.get_parameter_value("aspect_ratio")
             resolution = self.get_parameter_value("resolution")
             duration = self.get_parameter_value("duration")
             loop_video = self.get_parameter_value("loop")
@@ -205,6 +271,10 @@ class LumaVideoGeneration(ControlNode):
                 "prompt": prompt.strip(),
                 "model": model,
             }
+
+            # Add aspect_ratio for all models
+            if aspect_ratio:
+                params["aspect_ratio"] = aspect_ratio
 
             # Add resolution and duration for Ray 2 models
             if model in ["ray-2", "ray-flash-2"]:
