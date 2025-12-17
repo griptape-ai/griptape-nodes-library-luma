@@ -16,6 +16,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -368,7 +369,7 @@ class LumaImageGeneration(ControlNode):
             timestamp = int(time.time() * 1000)
             filename = f"luma_photon_{timestamp}.jpg"
             static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename
+                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
             )
 
             image_artifact = ImageUrlArtifact(

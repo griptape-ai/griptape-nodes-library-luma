@@ -16,6 +16,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 )
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -355,7 +356,7 @@ class LumaVideoReframe(ControlNode):
             timestamp = int(time.time() * 1000)
             filename = f"luma_reframe_{timestamp}.mp4"
             static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                video_bytes, filename
+                video_bytes, filename, ExistingFilePolicy.CREATE_NEW
             )
 
             video_artifact = VideoUrlArtifact(value=static_url)
