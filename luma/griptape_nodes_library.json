@@ -16,7 +16,7 @@
         "author": "Griptape",
         "description": "Griptape Nodes for Luma Labs Dream Machine API - Image and Video Generation",
         "library_version": "0.1.1",
-        "engine_version": "0.66.0",
+        "engine_version": "0.75.0",
         "tags": [
             "Griptape",
             "AI",
@@ -117,4 +117,3 @@
         }
     ]
 }
-

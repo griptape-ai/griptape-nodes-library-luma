@@ -2,7 +2,6 @@ import asyncio
 import time
 from typing import Any, Dict
 
-import requests
 from griptape.artifacts import VideoUrlArtifact, UrlArtifact, ImageArtifact, ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -16,6 +15,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.files.file import File, FileLoadError
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -338,10 +338,5 @@ class LumaVideoModify(ControlNode):
 
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
-        try:
-            response = requests.get(video_url, timeout=120)
-            response.raise_for_status()
-            return response.content
-        except Exception as e:
-            raise ValueError(f"Failed to download video from URL: {str(e)}")
+        return File(video_url).read_bytes()
 
