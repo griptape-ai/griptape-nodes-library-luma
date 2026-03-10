@@ -2,7 +2,6 @@ import asyncio
 import time
 from typing import Any, Dict
 
-import requests
 from griptape.artifacts import ImageUrlArtifact, ImageArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
@@ -17,6 +16,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.files.file import File, FileLoadError
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -384,10 +384,5 @@ class LumaImageReframe(ControlNode):
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
-        try:
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()
-            return response.content
-        except Exception as e:
-            raise ValueError(f"Failed to download image from URL: {str(e)}")
+        return File(image_url).read_bytes()
 
