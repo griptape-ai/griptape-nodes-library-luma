@@ -1,5 +1,4 @@
 import asyncio
-import time
 from typing import Any, Dict
 
 from griptape.artifacts import ImageUrlArtifact, ImageArtifact
@@ -13,9 +12,9 @@ from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.files.file import File, FileLoadError
 from lumaai import AsyncLumaAI
 
@@ -182,6 +181,13 @@ class LumaImageReframe(ControlNode):
                 ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
+
+        self._output_file = ProjectFileParameter(
+            node=self,
+            name="output_file",
+            default_filename="luma_reframe.jpg",
+        )
+        self._output_file.add_parameter()
 
     def _get_api_key(self) -> str:
         """Retrieve the Luma API key from configuration."""
@@ -356,15 +362,12 @@ class LumaImageReframe(ControlNode):
             self.append_value_to_parameter("status", "Downloading reframed image...\n")
             image_bytes = self._download_image(image_url)
 
-            # Save to static files
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_reframe_{timestamp}.jpg"
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
-            )
+            # Save to project files
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
             image_artifact = ImageUrlArtifact(
-                value=static_url, name=f"luma_reframe_{timestamp}"
+                value=saved.location, name=saved.name
             )
             self.parameter_output_values["output_image"] = image_artifact
             self.publish_update_to_parameter("output_image", image_artifact)

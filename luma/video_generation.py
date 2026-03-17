@@ -1,5 +1,4 @@
 import asyncio
-import time
 from typing import Any, Dict
 
 from griptape.artifacts import VideoUrlArtifact, ImageArtifact, ImageUrlArtifact
@@ -12,9 +11,9 @@ from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.traits.options import Options
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.files.file import File, FileLoadError
 from lumaai import AsyncLumaAI
 
@@ -182,6 +181,13 @@ class LumaVideoGeneration(ControlNode):
                 ui_options={"multiline": True, "pulse_on_run": True},
             )
         )
+
+        self._output_file = ProjectFileParameter(
+            node=self,
+            name="output_file",
+            default_filename="luma_ray2.mp4",
+        )
+        self._output_file.add_parameter()
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         """Update parameter visibility when model changes."""
@@ -376,14 +382,11 @@ class LumaVideoGeneration(ControlNode):
             self.append_value_to_parameter("status", "Downloading generated video...\n")
             video_bytes = self._download_video(video_url)
 
-            # Save to static files
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_ray2_{timestamp}.mp4"
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                video_bytes, filename, ExistingFilePolicy.CREATE_NEW
-            )
+            # Save to project files
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(video_bytes)
 
-            video_artifact = VideoUrlArtifact(value=static_url)
+            video_artifact = VideoUrlArtifact(value=saved.location)
             self.parameter_output_values["video"] = video_artifact
             self.publish_update_to_parameter("video", video_artifact)
 
