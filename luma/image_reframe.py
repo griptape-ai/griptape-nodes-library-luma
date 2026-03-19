@@ -1,22 +1,22 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
-from griptape.artifacts import ImageUrlArtifact, ImageArtifact
+from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
+    ParameterGroup,
     ParameterMode,
     ParameterTypeBuiltin,
-    ParameterGroup,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -26,7 +26,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaImageReframe(ControlNode):
     """Luma Labs Photon image reframing node for changing aspect ratios and extending images."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # Input image with public URL support
@@ -70,11 +70,7 @@ class LumaImageReframe(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
-                traits={
-                    Options(
-                        choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"]
-                    )
-                },
+                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"])},
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
@@ -193,16 +189,13 @@ class LumaImageReframe(ControlNode):
             )
         return api_key
 
-
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         input_image = self.get_parameter_value("input_image")
         if not input_image:
-            errors.append(
-                ValueError(f"{self.name}: Provide an input image to reframe.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide an input image to reframe."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -238,15 +231,12 @@ class LumaImageReframe(ControlNode):
 
             # Convert serialized dict back to artifact if needed
             input_image = self.get_parameter_value("input_image")
-            if isinstance(input_image, dict) and input_image.get('value'):
+            if isinstance(input_image, dict) and input_image.get("value"):
                 # Create proper artifact from serialized dict
-                input_image = ImageUrlArtifact(
-                    value=input_image['value'],
-                    name=input_image.get('name', 'input_image')
-                )
+                input_image = ImageUrlArtifact(value=input_image["value"], name=input_image.get("name", "input_image"))
                 # Update the parameter with the artifact object
                 self.set_parameter_value("input_image", input_image)
-            
+
             # Let PublicArtifactUrlParameter handle getting and converting the artifact
             image_url = self._public_input_image_parameter.get_public_url_for_parameter()
             if not image_url:
@@ -270,9 +260,7 @@ class LumaImageReframe(ControlNode):
             # Add optional prompt
             if prompt:
                 params["prompt"] = prompt.strip()
-                self.append_value_to_parameter(
-                    "status", f"Using prompt: {prompt.strip()}\n"
-                )
+                self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
 
             # Add advanced parameters if set (non-zero values)
             grid_position_x = self.get_parameter_value("grid_position_x")
@@ -304,22 +292,16 @@ class LumaImageReframe(ControlNode):
 
             if advanced_params:
                 params.update(advanced_params)
-                self.append_value_to_parameter(
-                    "status", f"Using advanced parameters: {advanced_params}\n"
-                )
+                self.append_value_to_parameter("status", f"Using advanced parameters: {advanced_params}\n")
 
             # Create reframe generation
             generation = await client.generations.image.reframe(**params)
             generation_id = generation.id
 
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {generation_id}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
             # Poll for completion
-            self.append_value_to_parameter(
-                "status", "Waiting for reframe to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for reframe to complete...\n")
 
             completed = False
             max_attempts = 120
@@ -333,22 +315,14 @@ class LumaImageReframe(ControlNode):
 
                 if generation.state == "completed":
                     completed = True
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: Completed!\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(
-                        f"Reframe failed: {generation.failure_reason}"
-                    )
+                    raise RuntimeError(f"Reframe failed: {generation.failure_reason}")
                 else:
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {generation.state}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(
-                    f"Reframe timed out after {max_attempts} attempts"
-                )
+                raise TimeoutError(f"Reframe timed out after {max_attempts} attempts")
 
             # Download and save image
             image_url = generation.assets.image
@@ -363,9 +337,7 @@ class LumaImageReframe(ControlNode):
                 image_bytes, filename, ExistingFilePolicy.CREATE_NEW
             )
 
-            image_artifact = ImageUrlArtifact(
-                value=static_url, name=f"luma_reframe_{timestamp}"
-            )
+            image_artifact = ImageUrlArtifact(value=static_url, name=f"luma_reframe_{timestamp}")
             self.parameter_output_values["output_image"] = image_artifact
             self.publish_update_to_parameter("output_image", image_artifact)
 
@@ -385,4 +357,3 @@ class LumaImageReframe(ControlNode):
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
         return File(image_url).read_bytes()
-

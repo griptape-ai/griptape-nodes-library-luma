@@ -1,22 +1,22 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
-from griptape.artifacts import VideoUrlArtifact, UrlArtifact
+from griptape.artifacts import VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
+    ParameterGroup,
     ParameterMode,
     ParameterTypeBuiltin,
-    ParameterGroup,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -26,7 +26,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaVideoReframe(ControlNode):
     """Luma Labs Ray video reframing node for changing aspect ratios and extending videos."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # Input video with public URL support
@@ -70,11 +70,7 @@ class LumaVideoReframe(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
-                traits={
-                    Options(
-                        choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"]
-                    )
-                },
+                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"])},
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
@@ -193,16 +189,13 @@ class LumaVideoReframe(ControlNode):
             )
         return api_key
 
-
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         input_video = self.get_parameter_value("input_video")
         if not input_video:
-            errors.append(
-                ValueError(f"{self.name}: Provide an input video to reframe.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide an input video to reframe."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -238,15 +231,12 @@ class LumaVideoReframe(ControlNode):
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
-            if isinstance(input_video, dict) and input_video.get('value'):
+            if isinstance(input_video, dict) and input_video.get("value"):
                 # Create proper artifact from serialized dict
-                input_video = VideoUrlArtifact(
-                    value=input_video['value'],
-                    name=input_video.get('name', 'input_video')
-                )
+                input_video = VideoUrlArtifact(value=input_video["value"], name=input_video.get("name", "input_video"))
                 # Update the parameter with the artifact object
                 self.set_parameter_value("input_video", input_video)
-            
+
             # Let PublicArtifactUrlParameter handle getting and converting the artifact
             video_url = self._public_input_video_parameter.get_public_url_for_parameter()
             if not video_url:
@@ -270,9 +260,7 @@ class LumaVideoReframe(ControlNode):
             # Add optional prompt
             if prompt:
                 params["prompt"] = prompt.strip()
-                self.append_value_to_parameter(
-                    "status", f"Using prompt: {prompt.strip()}\n"
-                )
+                self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
 
             # Add advanced parameters if set (non-zero values)
             grid_position_x = self.get_parameter_value("grid_position_x")
@@ -304,22 +292,16 @@ class LumaVideoReframe(ControlNode):
 
             if advanced_params:
                 params.update(advanced_params)
-                self.append_value_to_parameter(
-                    "status", f"Using advanced parameters: {advanced_params}\n"
-                )
+                self.append_value_to_parameter("status", f"Using advanced parameters: {advanced_params}\n")
 
             # Create reframe generation
             generation = await client.generations.video.reframe(**params)
             generation_id = generation.id
 
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {generation_id}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
             # Poll for completion
-            self.append_value_to_parameter(
-                "status", "Waiting for reframe to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for reframe to complete...\n")
 
             completed = False
             max_attempts = 180  # Videos take longer than images
@@ -333,15 +315,11 @@ class LumaVideoReframe(ControlNode):
 
                 if generation.state == "completed":
                     completed = True
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: Completed!\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
                     raise RuntimeError(f"Reframe failed: {generation.failure_reason}")
                 else:
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {generation.state}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
                 raise TimeoutError(f"Reframe timed out after {max_attempts} attempts")
@@ -379,4 +357,3 @@ class LumaVideoReframe(ControlNode):
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
         return File(video_url).read_bytes()
-
