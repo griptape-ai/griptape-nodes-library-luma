@@ -1,21 +1,21 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
-from griptape.artifacts import VideoUrlArtifact, ImageArtifact, ImageUrlArtifact
+from griptape.artifacts import ImageUrlArtifact, VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -25,7 +25,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaVideoGeneration(ControlNode):
     """Luma Labs Ray 2 video generation node supporting text-to-video and image-to-video."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         self.add_parameter(
@@ -208,16 +208,13 @@ class LumaVideoGeneration(ControlNode):
             )
         return api_key
 
-
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt for video generation.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide a prompt for video generation."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -289,41 +286,33 @@ class LumaVideoGeneration(ControlNode):
 
             # Build keyframes if start or end frame provided
             keyframes = {}
-            
+
             # Add optional start and end frames
             start_frame = self.get_parameter_value("start_frame")
             if start_frame:
                 # Convert serialized dicts back to artifacts if needed
-                if isinstance(start_frame, dict) and start_frame.get('value'):
+                if isinstance(start_frame, dict) and start_frame.get("value"):
                     start_frame = ImageUrlArtifact(
-                        value=start_frame['value'],
-                        name=start_frame.get('name', 'start_frame')
+                        value=start_frame["value"], name=start_frame.get("name", "start_frame")
                     )
                     self.set_parameter_value("start_frame", start_frame)
-                
+
                 start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
                 if start_frame_url:
                     keyframes["frame0"] = {"type": "image", "url": start_frame_url}
-                    self.append_value_to_parameter(
-                        "status", f"Using start frame: {start_frame_url}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
 
             end_frame = self.get_parameter_value("end_frame")
             if end_frame:
                 # Convert serialized dicts back to artifacts if needed
-                if isinstance(end_frame, dict) and end_frame.get('value'):
-                    end_frame = ImageUrlArtifact(
-                        value=end_frame['value'],
-                        name=end_frame.get('name', 'end_frame')
-                    )
+                if isinstance(end_frame, dict) and end_frame.get("value"):
+                    end_frame = ImageUrlArtifact(value=end_frame["value"], name=end_frame.get("name", "end_frame"))
                     self.set_parameter_value("end_frame", end_frame)
-                
+
                 end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
                 if end_frame_url:
                     keyframes["frame1"] = {"type": "image", "url": end_frame_url}
-                    self.append_value_to_parameter(
-                        "status", f"Using end frame: {end_frame_url}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
 
             if keyframes:
                 params["keyframes"] = keyframes
@@ -332,14 +321,10 @@ class LumaVideoGeneration(ControlNode):
             generation = await client.generations.create(**params)
             generation_id = generation.id
 
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {generation_id}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
             # Poll for completion
-            self.append_value_to_parameter(
-                "status", "Waiting for generation to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
             completed = False
             max_attempts = 200
@@ -353,22 +338,14 @@ class LumaVideoGeneration(ControlNode):
 
                 if generation.state == "completed":
                     completed = True
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: Completed!\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(
-                        f"Generation failed: {generation.failure_reason}"
-                    )
+                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
                 else:
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {generation.state}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(
-                    f"Generation timed out after {max_attempts} attempts"
-                )
+                raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
             # Download and save video
             video_url = generation.assets.video
@@ -404,4 +381,3 @@ class LumaVideoGeneration(ControlNode):
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
         return File(video_url).read_bytes()
-

@@ -1,12 +1,12 @@
 import asyncio
-from typing import Any, Dict
+from typing import Any
 
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from lumaai import AsyncLumaAI
 
@@ -17,7 +17,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaListConcepts(ControlNode):
     """List all available concepts that can be used in Luma video generation."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         self.add_parameter(
@@ -108,4 +108,3 @@ class LumaListConcepts(ControlNode):
             error_msg = f"❌ Failed to fetch concepts: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
-

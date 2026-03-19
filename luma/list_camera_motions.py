@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 from griptape_nodes.exe_types.core_types import (
@@ -7,7 +7,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 
 SERVICE = "Luma Labs"
@@ -18,7 +18,7 @@ API_BASE_URL = "https://api.lumalabs.ai/dream-machine/v1"
 class LumaListCameraMotions(ControlNode):
     """List all supported camera motions that can be used in Luma video generation prompts."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         self.add_parameter(
@@ -87,9 +87,7 @@ class LumaListCameraMotions(ControlNode):
         try:
             api_key = self._get_api_key()
 
-            self.append_value_to_parameter(
-                "status", "Fetching supported camera motions...\n"
-            )
+            self.append_value_to_parameter("status", "Fetching supported camera motions...\n")
 
             # Make direct API call to camera motions endpoint
             async with httpx.AsyncClient() as client:
@@ -126,4 +124,3 @@ class LumaListCameraMotions(ControlNode):
             error_msg = f"❌ Failed to fetch camera motions: {str(e)}\n"
             self.append_value_to_parameter("status", error_msg)
             raise
-

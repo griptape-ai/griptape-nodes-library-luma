@@ -1,22 +1,22 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
-from griptape.artifacts import ImageUrlArtifact, ImageArtifact
+from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
+from griptape_nodes.files.file import File
+from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from griptape_nodes.traits.slider import Slider
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.files.file import File, FileLoadError
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -26,7 +26,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaImageGeneration(ControlNode):
     """Luma Labs Photon image generation node supporting text-to-image, image references, style references, character references, and image modification."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         self.add_parameter(
@@ -162,16 +162,16 @@ class LumaImageGeneration(ControlNode):
             if value == "none":
                 # Hide both parameters when none is selected
                 self.hide_parameter_by_name(["reference_image", "reference_weight"])
-            
+
             elif value == "character_reference":
                 # Show only reference_image for character reference (doesn't use weight)
                 self.show_parameter_by_name(["reference_image"])
                 self.hide_parameter_by_name(["reference_weight"])
-            
+
             elif value in ["image_reference", "style_reference", "modify_image"]:
                 # Show both parameters for these reference types
                 self.show_parameter_by_name(["reference_image", "reference_weight"])
-                
+
                 # Set appropriate default weight based on reference type
                 if value == "image_reference":
                     self.set_parameter_value("reference_weight", 0.85)
@@ -190,16 +190,13 @@ class LumaImageGeneration(ControlNode):
             )
         return api_key
 
-
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt for image generation.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide a prompt for image generation."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -251,33 +248,32 @@ class LumaImageGeneration(ControlNode):
 
             # Add reference image based on selected type
             reference_type = self.get_parameter_value("reference_type")
-            
+
             if reference_type != "none":
                 # Convert serialized dict back to artifact if needed
                 reference_image = self.get_parameter_value("reference_image")
-                
+
                 # Only process if we have a reference image
                 if not reference_image:
                     self.append_value_to_parameter(
-                        "status", 
-                        f"⚠️ Reference type set to '{reference_type}' but no reference image provided. Proceeding without reference.\n"
+                        "status",
+                        f"⚠️ Reference type set to '{reference_type}' but no reference image provided. Proceeding without reference.\n",
                     )
                 else:
-                    if isinstance(reference_image, dict) and reference_image.get('value'):
+                    if isinstance(reference_image, dict) and reference_image.get("value"):
                         # Create proper artifact from serialized dict
                         reference_image = ImageUrlArtifact(
-                            value=reference_image['value'],
-                            name=reference_image.get('name', 'reference_image')
+                            value=reference_image["value"], name=reference_image.get("name", "reference_image")
                         )
                         # Update the parameter with the artifact object
                         self.set_parameter_value("reference_image", reference_image)
-                    
+
                     # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     reference_url = self._public_reference_image_parameter.get_public_url_for_parameter()
-                    
+
                     if reference_url:
                         reference_weight = self.get_parameter_value("reference_weight")
-                        
+
                         if reference_type == "image_reference":
                             params["image_ref"] = [
                                 {
@@ -285,10 +281,8 @@ class LumaImageGeneration(ControlNode):
                                     "weight": reference_weight,
                                 }
                             ]
-                            self.append_value_to_parameter(
-                                "status", f"Using image reference: {reference_url}\n"
-                            )
-                        
+                            self.append_value_to_parameter("status", f"Using image reference: {reference_url}\n")
+
                         elif reference_type == "style_reference":
                             params["style_ref"] = [
                                 {
@@ -296,39 +290,27 @@ class LumaImageGeneration(ControlNode):
                                     "weight": reference_weight,
                                 }
                             ]
-                            self.append_value_to_parameter(
-                                "status", f"Using style reference: {reference_url}\n"
-                            )
-                        
+                            self.append_value_to_parameter("status", f"Using style reference: {reference_url}\n")
+
                         elif reference_type == "character_reference":
-                            params["character_ref"] = {
-                                "identity0": {"images": [reference_url]}
-                            }
-                            self.append_value_to_parameter(
-                                "status", f"Using character reference: {reference_url}\n"
-                            )
-                        
+                            params["character_ref"] = {"identity0": {"images": [reference_url]}}
+                            self.append_value_to_parameter("status", f"Using character reference: {reference_url}\n")
+
                         elif reference_type == "modify_image":
                             params["modify_image_ref"] = {
                                 "url": reference_url,
                                 "weight": reference_weight,
                             }
-                            self.append_value_to_parameter(
-                                "status", f"Modifying image: {reference_url}\n"
-                            )
+                            self.append_value_to_parameter("status", f"Modifying image: {reference_url}\n")
 
             # Create generation
             generation = await client.generations.image.create(**params)
             generation_id = generation.id
 
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {generation_id}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
             # Poll for completion
-            self.append_value_to_parameter(
-                "status", "Waiting for generation to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
             completed = False
             max_attempts = 120
@@ -342,22 +324,14 @@ class LumaImageGeneration(ControlNode):
 
                 if generation.state == "completed":
                     completed = True
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: Completed!\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(
-                        f"Generation failed: {generation.failure_reason}"
-                    )
+                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
                 else:
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {generation.state}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(
-                    f"Generation timed out after {max_attempts} attempts"
-                )
+                raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
             # Download and save image
             image_url = generation.assets.image
@@ -372,9 +346,7 @@ class LumaImageGeneration(ControlNode):
                 image_bytes, filename, ExistingFilePolicy.CREATE_NEW
             )
 
-            image_artifact = ImageUrlArtifact(
-                value=static_url, name=f"luma_photon_{timestamp}"
-            )
+            image_artifact = ImageUrlArtifact(value=static_url, name=f"luma_photon_{timestamp}")
             self.set_parameter_value("image", image_artifact)
 
             self.append_value_to_parameter(
@@ -393,4 +365,3 @@ class LumaImageGeneration(ControlNode):
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
         return File(image_url).read_bytes()
-

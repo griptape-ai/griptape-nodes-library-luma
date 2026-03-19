@@ -1,21 +1,21 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
-from griptape.artifacts import VideoUrlArtifact, UrlArtifact, ImageArtifact, ImageUrlArtifact
+from griptape.artifacts import ImageUrlArtifact, VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import ControlNode, AsyncResult
+from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
-from griptape_nodes.traits.options import Options
-from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
-from griptape_nodes.files.file import File, FileLoadError
+from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 from lumaai import AsyncLumaAI
 
 SERVICE = "Luma Labs"
@@ -25,7 +25,7 @@ API_KEY_ENV_VAR = "LUMAAI_API_KEY"
 class LumaVideoModify(ControlNode):
     """Luma Labs Ray video modification node for style transfer and prompt-based editing."""
 
-    def __init__(self, name: str, metadata: Dict[Any, Any] | None = None) -> None:
+    def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
 
         # Input video with public URL support
@@ -154,22 +154,17 @@ class LumaVideoModify(ControlNode):
             )
         return api_key
 
-
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
         errors = []
 
         input_video = self.get_parameter_value("input_video")
         if not input_video:
-            errors.append(
-                ValueError(f"{self.name}: Provide an input video to modify.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide an input video to modify."))
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:
-            errors.append(
-                ValueError(f"{self.name}: Provide a prompt to guide the modification.")
-            )
+            errors.append(ValueError(f"{self.name}: Provide a prompt to guide the modification."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -205,15 +200,12 @@ class LumaVideoModify(ControlNode):
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
-            if isinstance(input_video, dict) and input_video.get('value'):
+            if isinstance(input_video, dict) and input_video.get("value"):
                 # Create proper artifact from serialized dict
-                input_video = VideoUrlArtifact(
-                    value=input_video['value'],
-                    name=input_video.get('name', 'input_video')
-                )
+                input_video = VideoUrlArtifact(value=input_video["value"], name=input_video.get("name", "input_video"))
                 # Update the parameter with the artifact object
                 self.set_parameter_value("input_video", input_video)
-            
+
             # Let PublicArtifactUrlParameter handle getting and converting the artifact
             video_url = self._public_input_video_parameter.get_public_url_for_parameter()
             if not video_url:
@@ -238,43 +230,32 @@ class LumaVideoModify(ControlNode):
                 "prompt": prompt.strip(),
             }
 
-            self.append_value_to_parameter(
-                "status", f"Using prompt: {prompt.strip()}\n"
-            )
-            self.append_value_to_parameter(
-                "status", f"Using mode: {mode}\n"
-            )
+            self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
+            self.append_value_to_parameter("status", f"Using mode: {mode}\n")
 
             # Add optional first frame
             first_frame = self.get_parameter_value("first_frame")
             if first_frame:
                 # Convert serialized dict back to artifact if needed
-                if isinstance(first_frame, dict) and first_frame.get('value'):
+                if isinstance(first_frame, dict) and first_frame.get("value"):
                     first_frame = ImageUrlArtifact(
-                        value=first_frame['value'],
-                        name=first_frame.get('name', 'first_frame')
+                        value=first_frame["value"], name=first_frame.get("name", "first_frame")
                     )
                     self.set_parameter_value("first_frame", first_frame)
-                
+
                 first_frame_url = self._public_first_frame_parameter.get_public_url_for_parameter()
                 if first_frame_url:
                     params["first_frame"] = {"url": first_frame_url}
-                    self.append_value_to_parameter(
-                        "status", f"Using first frame: {first_frame_url}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Using first frame: {first_frame_url}\n")
 
             # Create modify generation
             generation = await client.generations.video.modify(**params)
             generation_id = generation.id
 
-            self.append_value_to_parameter(
-                "status", f"Request created with ID: {generation_id}\n"
-            )
+            self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
             # Poll for completion
-            self.append_value_to_parameter(
-                "status", "Waiting for modification to complete...\n"
-            )
+            self.append_value_to_parameter("status", "Waiting for modification to complete...\n")
 
             completed = False
             max_attempts = 180  # Videos take longer
@@ -288,22 +269,14 @@ class LumaVideoModify(ControlNode):
 
                 if generation.state == "completed":
                     completed = True
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: Completed!\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(
-                        f"Modification failed: {generation.failure_reason}"
-                    )
+                    raise RuntimeError(f"Modification failed: {generation.failure_reason}")
                 else:
-                    self.append_value_to_parameter(
-                        "status", f"Attempt {attempt}: {generation.state}\n"
-                    )
+                    self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(
-                    f"Modification timed out after {max_attempts} attempts"
-                )
+                raise TimeoutError(f"Modification timed out after {max_attempts} attempts")
 
             # Get video URL
             video_url = generation.assets.video
@@ -339,4 +312,3 @@ class LumaVideoModify(ControlNode):
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
         return File(video_url).read_bytes()
-
