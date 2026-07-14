@@ -22,7 +22,7 @@ API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
 class LumaVideoGeneration(ControlNode):
-    """Luma Labs Ray 2 video generation node supporting text-to-video and image-to-video."""
+    """Luma Labs Ray video generation node supporting text-to-video and image-to-video."""
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
