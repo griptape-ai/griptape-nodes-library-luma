@@ -1,7 +1,7 @@
 [project]
 name = "griptape-nodes-library-luma"
-version = "0.1.0"
-description = "Griptape Nodes for Luma Labs Dream Machine API"
+version = "0.2.0"
+description = "Griptape Nodes for the Luma Agents API"
 authors = [
     {name = "Griptape", email = "hello@griptape.ai"}
 ]
@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = "~=3.12.9"
 dependencies = [
     "griptape-nodes",
-    "lumaai>=1.5.0",
+    "luma-agents>=0.4.0",
     "requests>=2.32.0",
     "pillow>=10.0.0",
     "httpx>=0.27.0",

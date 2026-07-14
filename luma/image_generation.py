@@ -1,5 +1,4 @@
 import asyncio
-import time
 from typing import Any
 
 from griptape.artifacts import ImageUrlArtifact
@@ -12,19 +11,18 @@ from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from griptape_nodes.traits.slider import Slider
-from lumaai import AsyncLumaAI
+from luma_agents import AsyncLuma
 
 SERVICE = "Luma Labs"
-API_KEY_ENV_VAR = "LUMAAI_API_KEY"
+API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
 class LumaImageGeneration(ControlNode):
-    """Luma Labs Photon image generation node supporting text-to-image, image references, style references, character references, and image modification."""
+    """Luma Labs image generation node supporting text-to-image, image references, and image editing."""
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
@@ -45,11 +43,11 @@ class LumaImageGeneration(ControlNode):
         self.add_parameter(
             Parameter(
                 name="model",
-                tooltip="Photon model to use. photon-1 is default, photon-flash-1 is faster.",
+                tooltip="Image model to use. uni-1 is the default tier; uni-1-max is higher quality.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="photon-1",
-                traits={Options(choices=["photon-1", "photon-flash-1"])},
+                default_value="uni-1",
+                traits={Options(choices=["uni-1", "uni-1-max"])},
                 ui_options={"display_name": "Model"},
             )
         )
@@ -69,7 +67,6 @@ class LumaImageGeneration(ControlNode):
                             "4:3",
                             "9:16",
                             "16:9",
-                            "9:21",
                             "21:9",
                         ]
                     )
@@ -81,7 +78,7 @@ class LumaImageGeneration(ControlNode):
         self.add_parameter(
             Parameter(
                 name="reference_type",
-                tooltip="Type of reference image to use for generation",
+                tooltip="How to use the reference image: as style/content guidance, or as the source to edit.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="none",
@@ -90,8 +87,6 @@ class LumaImageGeneration(ControlNode):
                         choices=[
                             "none",
                             "image_reference",
-                            "style_reference",
-                            "character_reference",
                             "modify_image",
                         ]
                     )
@@ -125,18 +120,6 @@ class LumaImageGeneration(ControlNode):
 
         self.add_parameter(
             Parameter(
-                name="reference_weight",
-                tooltip="Weight/influence of reference image (0.0-1.0). Not used for character reference.",
-                type=ParameterTypeBuiltin.FLOAT.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0.85,
-                traits={Slider(min_val=0.0, max_val=1.0)},
-                ui_options={"hide": True},
-            )
-        )
-
-        self.add_parameter(
-            Parameter(
                 name="image",
                 tooltip="Generated image",
                 output_type="ImageUrlArtifact",
@@ -156,29 +139,20 @@ class LumaImageGeneration(ControlNode):
             )
         )
 
+        self._output_file = ProjectFileParameter(
+            node=self,
+            name="output_file",
+            default_filename="luma_image.jpg",
+        )
+        self._output_file.add_parameter()
+
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        """Update reference weight default and parameter visibility when reference type changes."""
+        """Update parameter visibility when reference type changes."""
         if parameter.name == "reference_type":
             if value == "none":
-                # Hide both parameters when none is selected
-                self.hide_parameter_by_name(["reference_image", "reference_weight"])
-
-            elif value == "character_reference":
-                # Show only reference_image for character reference (doesn't use weight)
+                self.hide_parameter_by_name(["reference_image"])
+            else:
                 self.show_parameter_by_name(["reference_image"])
-                self.hide_parameter_by_name(["reference_weight"])
-
-            elif value in ["image_reference", "style_reference", "modify_image"]:
-                # Show both parameters for these reference types
-                self.show_parameter_by_name(["reference_image", "reference_weight"])
-
-                # Set appropriate default weight based on reference type
-                if value == "image_reference":
-                    self.set_parameter_value("reference_weight", 0.85)
-                elif value == "style_reference":
-                    self.set_parameter_value("reference_weight", 0.8)
-                elif value == "modify_image":
-                    self.set_parameter_value("reference_weight", 1.0)
 
     def _get_api_key(self) -> str:
         """Retrieve the Luma API key from configuration."""
@@ -186,7 +160,7 @@ class LumaImageGeneration(ControlNode):
         if not api_key:
             raise ValueError(
                 f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://lumalabs.ai/dream-machine/api/keys"
+                "Get your API key from: https://platform.lumalabs.ai"
             )
         return api_key
 
@@ -226,9 +200,10 @@ class LumaImageGeneration(ControlNode):
 
     async def _process_async(self) -> None:
         """Generate image using Luma async API."""
+        client = None
         try:
             api_key = self._get_api_key()
-            client = AsyncLumaAI(auth_token=api_key)
+            client = AsyncLuma(auth_token=api_key)
 
             prompt = self.get_parameter_value("prompt")
             if not prompt:
@@ -239,8 +214,9 @@ class LumaImageGeneration(ControlNode):
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
-            # Build request parameters
+            # Build request parameters. Default to a text-to-image generation.
             params = {
+                "type": "image",
                 "prompt": prompt.strip(),
                 "model": model,
                 "aspect_ratio": aspect_ratio,
@@ -272,39 +248,19 @@ class LumaImageGeneration(ControlNode):
                     reference_url = self._public_reference_image_parameter.get_public_url_for_parameter()
 
                     if reference_url:
-                        reference_weight = self.get_parameter_value("reference_weight")
-
                         if reference_type == "image_reference":
-                            params["image_ref"] = [
-                                {
-                                    "url": reference_url,
-                                    "weight": reference_weight,
-                                }
-                            ]
+                            # Reference image guides a fresh generation
+                            params["image_ref"] = [{"url": reference_url}]
                             self.append_value_to_parameter("status", f"Using image reference: {reference_url}\n")
 
-                        elif reference_type == "style_reference":
-                            params["style_ref"] = [
-                                {
-                                    "url": reference_url,
-                                    "weight": reference_weight,
-                                }
-                            ]
-                            self.append_value_to_parameter("status", f"Using style reference: {reference_url}\n")
-
-                        elif reference_type == "character_reference":
-                            params["character_ref"] = {"identity0": {"images": [reference_url]}}
-                            self.append_value_to_parameter("status", f"Using character reference: {reference_url}\n")
-
                         elif reference_type == "modify_image":
-                            params["modify_image_ref"] = {
-                                "url": reference_url,
-                                "weight": reference_weight,
-                            }
+                            # Edit the reference image directly
+                            params["type"] = "image_edit"
+                            params["source"] = {"url": reference_url}
                             self.append_value_to_parameter("status", f"Modifying image: {reference_url}\n")
 
             # Create generation
-            generation = await client.generations.image.create(**params)
+            generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
@@ -320,7 +276,7 @@ class LumaImageGeneration(ControlNode):
                 await asyncio.sleep(2)
                 attempt += 1
 
-                generation = await client.generations.get(id=generation_id)
+                generation = await client.generations.get(generation_id=generation_id)
 
                 if generation.state == "completed":
                     completed = True
@@ -333,20 +289,17 @@ class LumaImageGeneration(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
-            # Download and save image
-            image_url = generation.assets.image
+            # Download and save image from the generation output list
+            image_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading generated image...\n")
             image_bytes = self._download_image(image_url)
 
-            # Save to static files
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_photon_{timestamp}.jpg"
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                image_bytes, filename, ExistingFilePolicy.CREATE_NEW
-            )
+            # Save to project files
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(image_bytes)
 
-            image_artifact = ImageUrlArtifact(value=static_url, name=f"luma_photon_{timestamp}")
+            image_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
             self.set_parameter_value("image", image_artifact)
 
             self.append_value_to_parameter(
@@ -359,6 +312,10 @@ class LumaImageGeneration(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
         finally:
+            # Close the async client while the event loop is still alive to avoid
+            # "Event loop is closed" errors when httpx is finalized during GC.
+            if client is not None:
+                await client.close()
             # Cleanup uploaded artifacts
             self._public_reference_image_parameter.delete_uploaded_artifact()
 

@@ -1,5 +1,5 @@
 import asyncio
-import time
+import mimetypes
 from typing import Any
 
 from griptape.artifacts import VideoUrlArtifact
@@ -13,14 +13,14 @@ from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
+from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from lumaai import AsyncLumaAI
+from luma_agents import AsyncLuma
 
 SERVICE = "Luma Labs"
-API_KEY_ENV_VAR = "LUMAAI_API_KEY"
+API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
 class LumaVideoReframe(ControlNode):
@@ -34,7 +34,7 @@ class LumaVideoReframe(ControlNode):
             node=self,
             artifact_url_parameter=Parameter(
                 name="input_video",
-                tooltip="Input video to reframe (max 10s for ray-2, 30s for ray-flash-2, 100 MB max)",
+                tooltip="Input video to reframe (max 18s, 100 MB max)",
                 input_types=["VideoUrlArtifact", "UrlArtifact"],
                 type="VideoUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
@@ -54,11 +54,11 @@ class LumaVideoReframe(ControlNode):
         self.add_parameter(
             Parameter(
                 name="model",
-                tooltip="Ray model to use. Ray 2 is higher quality (max 10s), Ray 2 Flash is faster (max 30s).",
+                tooltip="Ray model to use for video reframing.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="ray-2",
-                traits={Options(choices=["ray-2", "ray-flash-2"])},
+                default_value="ray-3.2",
+                traits={Options(choices=["ray-3.2"])},
                 ui_options={"display_name": "Model"},
             )
         )
@@ -70,7 +70,7 @@ class LumaVideoReframe(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
-                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"])},
+                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9"])},
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
@@ -89,70 +89,40 @@ class LumaVideoReframe(ControlNode):
             )
         )
 
-        # Advanced parameters group
+        # Advanced source-position controls. These define the normalized rectangle the source
+        # video occupies inside the output canvas. Leave all at 0 to let the model choose the
+        # default centered-fit crop.
         with ParameterGroup(name="Advanced") as advanced_group:
             Parameter(
-                name="grid_position_x",
-                tooltip="Grid position X (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
+                name="x_norm",
+                tooltip="Left edge of the source rectangle, as a fraction of canvas width (may be negative).",
+                type=ParameterTypeBuiltin.FLOAT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
+                default_value=0.0,
             )
 
             Parameter(
-                name="grid_position_y",
-                tooltip="Grid position Y (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
+                name="y_norm",
+                tooltip="Top edge of the source rectangle, as a fraction of canvas height (may be negative).",
+                type=ParameterTypeBuiltin.FLOAT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
+                default_value=0.0,
             )
 
             Parameter(
-                name="x_start",
-                tooltip="X coordinate where original video starts (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
+                name="w_norm",
+                tooltip="Source rectangle width, as a fraction of canvas width (up to 2.0). 0 uses the default crop.",
+                type=ParameterTypeBuiltin.FLOAT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
+                default_value=0.0,
             )
 
             Parameter(
-                name="x_end",
-                tooltip="X coordinate where original video ends (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
+                name="h_norm",
+                tooltip="Source rectangle height, as a fraction of canvas height (up to 2.0). 0 uses the default crop.",
+                type=ParameterTypeBuiltin.FLOAT.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
-            )
-
-            Parameter(
-                name="y_start",
-                tooltip="Y coordinate where original video starts (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
-            )
-
-            Parameter(
-                name="y_end",
-                tooltip="Y coordinate where original video ends (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
-            )
-
-            Parameter(
-                name="resized_width",
-                tooltip="Resized width of original video (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
-            )
-
-            Parameter(
-                name="resized_height",
-                tooltip="Resized height of original video (in pixels)",
-                type=ParameterTypeBuiltin.INT.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value=0,
+                default_value=0.0,
             )
 
         advanced_group.ui_options = {"collapsed": True}
@@ -179,13 +149,20 @@ class LumaVideoReframe(ControlNode):
             )
         )
 
+        self._output_file = ProjectFileParameter(
+            node=self,
+            name="output_file",
+            default_filename="luma_reframe.mp4",
+        )
+        self._output_file.add_parameter()
+
     def _get_api_key(self) -> str:
         """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             raise ValueError(
                 f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://lumalabs.ai/dream-machine/api/keys"
+                "Get your API key from: https://platform.lumalabs.ai"
             )
         return api_key
 
@@ -225,9 +202,10 @@ class LumaVideoReframe(ControlNode):
 
     async def _process_async(self) -> None:
         """Reframe video using Luma async API."""
+        client = None
         try:
             api_key = self._get_api_key()
-            client = AsyncLumaAI(auth_token=api_key)
+            client = AsyncLuma(auth_token=api_key)
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
@@ -249,12 +227,12 @@ class LumaVideoReframe(ControlNode):
             self.append_value_to_parameter("status", f"Using input video: {video_url}\n")
             self.append_value_to_parameter("status", "Creating reframe request...\n")
 
-            # Build request parameters
+            # Build request parameters for the video_reframe generation type
             params = {
-                "media": {"url": video_url},
+                "type": "video_reframe",
                 "model": model,
                 "aspect_ratio": aspect_ratio,
-                "generation_type": "reframe_video",
+                "source": {"url": video_url, "media_type": mimetypes.guess_type(video_url)[0] or "video/mp4"},
             }
 
             # Add optional prompt
@@ -262,40 +240,21 @@ class LumaVideoReframe(ControlNode):
                 params["prompt"] = prompt.strip()
                 self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
 
-            # Add advanced parameters if set (non-zero values)
-            grid_position_x = self.get_parameter_value("grid_position_x")
-            grid_position_y = self.get_parameter_value("grid_position_y")
-            x_start = self.get_parameter_value("x_start")
-            x_end = self.get_parameter_value("x_end")
-            y_start = self.get_parameter_value("y_start")
-            y_end = self.get_parameter_value("y_end")
-            resized_width = self.get_parameter_value("resized_width")
-            resized_height = self.get_parameter_value("resized_height")
-
-            advanced_params = {}
-            if grid_position_x != 0:
-                advanced_params["grid_position_x"] = grid_position_x
-            if grid_position_y != 0:
-                advanced_params["grid_position_y"] = grid_position_y
-            if x_start != 0:
-                advanced_params["x_start"] = x_start
-            if x_end != 0:
-                advanced_params["x_end"] = x_end
-            if y_start != 0:
-                advanced_params["y_start"] = y_start
-            if y_end != 0:
-                advanced_params["y_end"] = y_end
-            if resized_width != 0:
-                advanced_params["resized_width"] = resized_width
-            if resized_height != 0:
-                advanced_params["resized_height"] = resized_height
-
-            if advanced_params:
-                params.update(advanced_params)
-                self.append_value_to_parameter("status", f"Using advanced parameters: {advanced_params}\n")
+            # Add optional source position (normalized rectangle) if a width/height is provided
+            w_norm = self.get_parameter_value("w_norm")
+            h_norm = self.get_parameter_value("h_norm")
+            if w_norm != 0 or h_norm != 0:
+                source_position = {
+                    "x_norm": self.get_parameter_value("x_norm"),
+                    "y_norm": self.get_parameter_value("y_norm"),
+                    "w_norm": w_norm,
+                    "h_norm": h_norm,
+                }
+                params["video"] = {"source_position": source_position}
+                self.append_value_to_parameter("status", f"Using source position: {source_position}\n")
 
             # Create reframe generation
-            generation = await client.generations.video.reframe(**params)
+            generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
@@ -311,7 +270,7 @@ class LumaVideoReframe(ControlNode):
                 await asyncio.sleep(3)  # Longer wait for videos
                 attempt += 1
 
-                generation = await client.generations.get(id=generation_id)
+                generation = await client.generations.get(generation_id=generation_id)
 
                 if generation.state == "completed":
                     completed = True
@@ -324,20 +283,17 @@ class LumaVideoReframe(ControlNode):
             if not completed:
                 raise TimeoutError(f"Reframe timed out after {max_attempts} attempts")
 
-            # Get video URL
-            video_url = generation.assets.video
+            # Get video URL from the generation output list
+            video_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading reframed video...\n")
             video_bytes = self._download_video(video_url)
 
-            # Save to static files
-            timestamp = int(time.time() * 1000)
-            filename = f"luma_reframe_{timestamp}.mp4"
-            static_url = GriptapeNodes.StaticFilesManager().save_static_file(
-                video_bytes, filename, ExistingFilePolicy.CREATE_NEW
-            )
+            # Save to project files
+            dest = self._output_file.build_file()
+            saved = dest.write_bytes(video_bytes)
 
-            video_artifact = VideoUrlArtifact(value=static_url)
+            video_artifact = VideoUrlArtifact(value=saved.location)
             self.parameter_output_values["output_video"] = video_artifact
             self.publish_update_to_parameter("output_video", video_artifact)
 
@@ -351,6 +307,10 @@ class LumaVideoReframe(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
         finally:
+            # Close the async client while the event loop is still alive to avoid
+            # "Event loop is closed" errors when httpx is finalized during GC.
+            if client is not None:
+                await client.close()
             # Cleanup uploaded artifacts
             self._public_input_video_parameter.delete_uploaded_artifact()
 
