@@ -16,7 +16,7 @@ This library provides Griptape nodes for interacting with the [Luma Agents API](
 
 1. Get your API key from the [Luma API Platform](https://platform.lumalabs.ai)
 
-2. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMAAI_API_KEY`
+2. Add the library to Griptape Nodes and configure your API key in the secrets manager as `LUMA_AGENTS_API_KEY`
 
 ## Nodes
 
@@ -27,7 +27,7 @@ Generate images from text prompts with support for:
 - Text-to-image generation
 - Image references to guide a fresh generation
 - Image editing (modify an existing image)
-- Multiple aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 9:21, 21:9)
+- Multiple aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 21:9)
 - Two model options: `uni-1` (default) and `uni-1-max` (higher quality)
 
 ### Video Generation Node
@@ -39,14 +39,14 @@ Generate videos from text prompts or images with support for:
 - The `ray-3.2` model
 - Multiple resolutions (360p, 540p, 720p, 1080p)
 - Duration control (5s or 10s)
-- Aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 9:21, 21:9)
+- Aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 21:9)
 - Seamless looping
 
 ### Video Reframe Node
 
 Change aspect ratios and intelligently extend videos to new dimensions:
 
-- Convert between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9, 9:21)
+- Convert between aspect ratios (1:1, 4:3, 3:4, 16:9, 9:16, 21:9)
 - Optional text prompt to guide content generation in new areas
 - The `ray-3.2` model
 - Maximum file size: 100 MB
