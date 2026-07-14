@@ -67,7 +67,6 @@ class LumaImageGeneration(ControlNode):
                             "4:3",
                             "9:16",
                             "16:9",
-                            "9:21",
                             "21:9",
                         ]
                     )

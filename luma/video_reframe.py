@@ -70,7 +70,7 @@ class LumaVideoReframe(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
-                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9", "9:21"])},
+                traits={Options(choices=["1:1", "4:3", "3:4", "16:9", "9:16", "21:9"])},
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
