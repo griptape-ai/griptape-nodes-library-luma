@@ -200,6 +200,7 @@ class LumaImageGeneration(ControlNode):
 
     async def _process_async(self) -> None:
         """Generate image using Luma async API."""
+        client = None
         try:
             api_key = self._get_api_key()
             client = AsyncLuma(auth_token=api_key)
@@ -311,6 +312,10 @@ class LumaImageGeneration(ControlNode):
             self.append_value_to_parameter("status", error_msg)
             raise
         finally:
+            # Close the async client while the event loop is still alive to avoid
+            # "Event loop is closed" errors when httpx is finalized during GC.
+            if client is not None:
+                await client.close()
             # Cleanup uploaded artifacts
             self._public_reference_image_parameter.delete_uploaded_artifact()
 
