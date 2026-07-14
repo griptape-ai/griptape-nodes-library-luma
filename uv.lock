@@ -295,12 +295,12 @@ dependencies = [
 
 [[package]]
 name = "griptape-nodes-library-luma"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "griptape-nodes" },
     { name = "httpx" },
-    { name = "lumaai" },
+    { name = "luma-agents" },
     { name = "pillow" },
     { name = "requests" },
 ]
@@ -317,7 +317,7 @@ dev = [
 requires-dist = [
     { name = "griptape-nodes", git = "https://github.com/griptape-ai/griptape-nodes?rev=latest" },
     { name = "httpx", specifier = ">=0.27.0" },
-    { name = "lumaai", specifier = ">=1.5.0" },
+    { name = "luma-agents", specifier = ">=0.4.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "requests", specifier = ">=2.32.0" },
 ]
@@ -516,8 +516,8 @@ wheels = [
 ]
 
 [[package]]
-name = "lumaai"
-version = "1.20.1"
+name = "luma-agents"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -527,9 +527,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bc/06/c02539753c28f49ec64046a43d3f6b77221956cffa33dc601fb30fcb24f7/lumaai-1.20.1.tar.gz", hash = "sha256:2b35e232b2ba09d310c4eb784e498fff4eae3b5b43a233c7af16fd7586fa5f74", size = 121066, upload-time = "2026-03-07T21:15:17.469Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/aa/59d9c613bc8602e66ae53644378b699f1df1cc929e9138fc4bd244b5cd3f/luma_agents-0.4.0.tar.gz", hash = "sha256:d251c8765c252cd9268cda7388efe55861b4d44104576d45419cda5ba9f7a56f", size = 119286, upload-time = "2026-06-23T21:10:58.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cc/ab/43e271939d432c65c2c57bd41bfb45e35f1ffd18ac59933f27db64cfe382/lumaai-1.20.1-py3-none-any.whl", hash = "sha256:a7f5be568898da0e979997c42519fca75247fb8f67c55d7f927013dadac6e028", size = 95332, upload-time = "2026-03-07T21:15:16.29Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/52/8dd794d259665ff1ad714ea395264e0f3b211be56896d59b9f8488351003/luma_agents-0.4.0-py3-none-any.whl", hash = "sha256:0e2d2d7115585e2507a1d974f933a39d8d2a05aa32075e7e49483c4807686db5", size = 100598, upload-time = "2026-06-23T21:10:57.175Z" },
 ]
 
 [[package]]

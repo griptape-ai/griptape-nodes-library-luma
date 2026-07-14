@@ -16,10 +16,10 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from lumaai import AsyncLumaAI
+from luma_agents import AsyncLuma
 
 SERVICE = "Luma Labs"
-API_KEY_ENV_VAR = "LUMAAI_API_KEY"
+API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
 class LumaVideoGeneration(ControlNode):
@@ -44,41 +44,19 @@ class LumaVideoGeneration(ControlNode):
         self.add_parameter(
             Parameter(
                 name="model",
-                tooltip="Ray 2 model to use. Ray 2 is higher quality, Ray 2 Flash is faster.",
+                tooltip="Ray model to use for video generation.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="ray-2",
-                traits={Options(choices=["ray-2", "ray-flash-2", "ray-1-6"])},
+                default_value="ray-3.2",
+                traits={Options(choices=["ray-3.2"])},
                 ui_options={"display_name": "Model"},
             )
         )
 
-        # Aspect ratio parameter for ray-1-6 (limited options)
-        self.add_parameter(
-            Parameter(
-                name="aspect_ratio_ray16",
-                tooltip="Video aspect ratio for ray-1-6 model",
-                type=ParameterTypeBuiltin.STR.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="16:9",
-                traits={
-                    Options(
-                        choices=[
-                            "1:1",
-                            "9:16",
-                            "16:9",
-                        ]
-                    )
-                },
-                ui_options={"display_name": "Aspect Ratio", "hide": True},
-            )
-        )
-
-        # Aspect ratio parameter for ray-2 and ray-flash-2 (all options)
         self.add_parameter(
             Parameter(
                 name="aspect_ratio",
-                tooltip="Video aspect ratio for ray-2 and ray-flash-2 models",
+                tooltip="Video aspect ratio",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
@@ -106,7 +84,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="720p",
-                traits={Options(choices=["540p", "720p", "1080p", "4k"])},
+                traits={Options(choices=["360p", "540p", "720p", "1080p"])},
                 ui_options={"display_name": "Resolution"},
             )
         )
@@ -118,7 +96,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="5s",
-                traits={Options(choices=["5s", "9s"])},
+                traits={Options(choices=["5s", "10s"])},
                 ui_options={"display_name": "Duration"},
             )
         )
@@ -183,28 +161,13 @@ class LumaVideoGeneration(ControlNode):
             )
         )
 
-    def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        """Update parameter visibility when model changes."""
-        if parameter.name == "model":
-            if value == "ray-1-6":
-                # Hide duration and resolution parameters for ray-1-6 (doesn't support them)
-                self.hide_parameter_by_name(["duration", "resolution"])
-                # Show ray-1-6 aspect ratio, hide general aspect ratio
-                self.show_parameter_by_name(["aspect_ratio_ray16"])
-                self.hide_parameter_by_name(["aspect_ratio"])
-            else:
-                # Show all parameters for ray-2 and ray-flash-2
-                self.show_parameter_by_name(["duration", "resolution", "aspect_ratio"])
-                # Hide ray-1-6 aspect ratio
-                self.hide_parameter_by_name(["aspect_ratio_ray16"])
-
     def _get_api_key(self) -> str:
         """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             raise ValueError(
                 f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://lumalabs.ai/dream-machine/api/keys"
+                "Get your API key from: https://platform.lumalabs.ai"
             )
         return api_key
 
@@ -246,46 +209,40 @@ class LumaVideoGeneration(ControlNode):
         """Generate video using Luma async API."""
         try:
             api_key = self._get_api_key()
-            client = AsyncLumaAI(auth_token=api_key)
+            client = AsyncLuma(auth_token=api_key)
 
             prompt = self.get_parameter_value("prompt")
             if not prompt:
                 raise ValueError("Prompt is required and cannot be empty")
 
             model = self.get_parameter_value("model")
-            # Get the appropriate aspect_ratio parameter based on model
-            if model == "ray-1-6":
-                aspect_ratio = self.get_parameter_value("aspect_ratio_ray16")
-            else:
-                aspect_ratio = self.get_parameter_value("aspect_ratio")
+            aspect_ratio = self.get_parameter_value("aspect_ratio")
             resolution = self.get_parameter_value("resolution")
             duration = self.get_parameter_value("duration")
             loop_video = self.get_parameter_value("loop")
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
-            # Build request parameters
+            # Build request parameters for the video generation type
             params = {
+                "type": "video",
                 "prompt": prompt.strip(),
                 "model": model,
             }
 
-            # Add aspect_ratio for all models
             if aspect_ratio:
                 params["aspect_ratio"] = aspect_ratio
 
-            # Add resolution and duration for Ray 2 models
-            if model in ["ray-2", "ray-flash-2"]:
-                params["resolution"] = resolution
-                params["duration"] = duration
+            # Video-specific output settings live under the `video` options object
+            video_options: dict = {
+                "resolution": resolution,
+                "duration": duration,
+            }
 
             # Add loop if enabled
             if loop_video:
-                params["loop"] = True
+                video_options["loop"] = True
                 self.append_value_to_parameter("status", "Loop mode enabled\n")
-
-            # Build keyframes if start or end frame provided
-            keyframes = {}
 
             # Add optional start and end frames
             start_frame = self.get_parameter_value("start_frame")
@@ -299,7 +256,7 @@ class LumaVideoGeneration(ControlNode):
 
                 start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
                 if start_frame_url:
-                    keyframes["frame0"] = {"type": "image", "url": start_frame_url}
+                    video_options["start_frame"] = {"url": start_frame_url}
                     self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
 
             end_frame = self.get_parameter_value("end_frame")
@@ -311,11 +268,10 @@ class LumaVideoGeneration(ControlNode):
 
                 end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
                 if end_frame_url:
-                    keyframes["frame1"] = {"type": "image", "url": end_frame_url}
+                    video_options["end_frame"] = {"url": end_frame_url}
                     self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
 
-            if keyframes:
-                params["keyframes"] = keyframes
+            params["video"] = video_options
 
             # Create generation
             generation = await client.generations.create(**params)
@@ -334,7 +290,7 @@ class LumaVideoGeneration(ControlNode):
                 await asyncio.sleep(3)
                 attempt += 1
 
-                generation = await client.generations.get(id=generation_id)
+                generation = await client.generations.get(generation_id=generation_id)
 
                 if generation.state == "completed":
                     completed = True
@@ -347,8 +303,8 @@ class LumaVideoGeneration(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
-            # Download and save video
-            video_url = generation.assets.video
+            # Download and save video from the generation output list
+            video_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading generated video...\n")
             video_bytes = self._download_video(video_url)

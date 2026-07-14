@@ -7,21 +7,21 @@
             "category": "app_events.on_app_initialization_complete",
             "contents": {
                 "secrets_to_register": [
-                    "LUMAAI_API_KEY"
+                    "LUMA_AGENTS_API_KEY"
                 ]
             }
         }
     ],
     "metadata": {
         "author": "Griptape",
-        "description": "Griptape Nodes for Luma Labs Dream Machine API - Image and Video Generation",
-        "library_version": "0.1.1",
+        "description": "Griptape Nodes for the Luma Agents API - Image and Video Generation",
+        "library_version": "0.2.0",
         "engine_version": "0.75.0",
         "tags": [
             "Griptape",
             "AI",
             "Luma Labs",
-            "Dream Machine",
+            "Luma Agents",
             "Image Generation",
             "Video Generation",
             "Text-to-Image",
@@ -29,7 +29,7 @@
         ],
         "dependencies": {
             "pip_dependencies": [
-                "lumaai"
+                "luma-agents"
             ]
         }
     },
@@ -57,7 +57,7 @@
             "file_path": "image_generation.py",
             "metadata": {
                 "category": "image/luma",
-                "description": "Generate high-quality images using Luma Labs Photon models with support for text-to-image, image references, style references, character references, and image modification",
+                "description": "Generate high-quality images using Luma Agents models with support for text-to-image, image references, and image editing",
                 "display_name": "Luma Image Generation"
             }
         },
@@ -66,17 +66,8 @@
             "file_path": "video_generation.py",
             "metadata": {
                 "category": "video/luma",
-                "description": "Generate videos using Luma Labs Ray 2 models with text-to-video and image-to-video capabilities",
+                "description": "Generate videos using Luma Agents Ray models with text-to-video and image-to-video capabilities",
                 "display_name": "Luma Video Generation"
-            }
-        },
-        {
-            "class_name": "LumaImageReframe",
-            "file_path": "image_reframe.py",
-            "metadata": {
-                "category": "image/luma",
-                "description": "Reframe images to different aspect ratios using Luma Labs Photon models with optional content steering",
-                "display_name": "Luma Image Reframe"
             }
         },
         {
@@ -84,7 +75,7 @@
             "file_path": "video_reframe.py",
             "metadata": {
                 "category": "video/luma",
-                "description": "Reframe videos to different aspect ratios using Luma Labs Ray models with optional content steering",
+                "description": "Reframe videos to different aspect ratios using Luma Agents Ray models with optional content steering",
                 "display_name": "Luma Video Reframe"
             }
         },
@@ -93,26 +84,8 @@
             "file_path": "video_modify.py",
             "metadata": {
                 "category": "video/luma",
-                "description": "Modify videos with style transfer and prompt-based editing using Luma Labs Ray models. Supports Adhere (subtle), Flex (balanced), and Reimagine (dramatic) modes",
+                "description": "Modify videos with style transfer and prompt-based editing using Luma Agents Ray models. Supports Adhere (subtle), Flex (balanced), and Reimagine (dramatic) modes",
                 "display_name": "Luma Video Modify"
-            }
-        },
-        {
-            "class_name": "LumaListConcepts",
-            "file_path": "list_concepts.py",
-            "metadata": {
-                "category": "video/luma",
-                "description": "List all available concepts that can be used in Luma video generation",
-                "display_name": "Luma List Concepts"
-            }
-        },
-        {
-            "class_name": "LumaListCameraMotions",
-            "file_path": "list_camera_motions.py",
-            "metadata": {
-                "category": "video/luma",
-                "description": "List all supported camera motion strings for Luma video generation. These can be used in prompts to control camera movement",
-                "display_name": "Luma List Camera Motions"
             }
         }
     ]

@@ -1,4 +1,5 @@
 import asyncio
+import mimetypes
 import time
 from typing import Any
 
@@ -16,10 +17,10 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.events.os_events import ExistingFilePolicy
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
-from lumaai import AsyncLumaAI
+from luma_agents import AsyncLuma
 
 SERVICE = "Luma Labs"
-API_KEY_ENV_VAR = "LUMAAI_API_KEY"
+API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
 class LumaVideoModify(ControlNode):
@@ -33,7 +34,7 @@ class LumaVideoModify(ControlNode):
             node=self,
             artifact_url_parameter=Parameter(
                 name="input_video",
-                tooltip="Input video to modify (max 10s for ray-2, 15s for ray-flash-2, 100 MB max)",
+                tooltip="Input video to modify (max 18s, 100 MB max)",
                 input_types=["VideoUrlArtifact", "UrlArtifact"],
                 type="VideoUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
@@ -66,11 +67,11 @@ class LumaVideoModify(ControlNode):
         self.add_parameter(
             Parameter(
                 name="model",
-                tooltip="Ray model to use. Ray 2 is higher quality (max 10s), Ray 2 Flash is faster (max 15s).",
+                tooltip="Ray model to use for video editing.",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="ray-2",
-                traits={Options(choices=["ray-2", "ray-flash-2"])},
+                default_value="ray-3.2",
+                traits={Options(choices=["ray-3.2"])},
                 ui_options={"display_name": "Model"},
             )
         )
@@ -150,7 +151,7 @@ class LumaVideoModify(ControlNode):
         if not api_key:
             raise ValueError(
                 f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://lumalabs.ai/dream-machine/api/keys"
+                "Get your API key from: https://platform.lumalabs.ai"
             )
         return api_key
 
@@ -196,7 +197,7 @@ class LumaVideoModify(ControlNode):
         """Modify video using Luma async API."""
         try:
             api_key = self._get_api_key()
-            client = AsyncLumaAI(auth_token=api_key)
+            client = AsyncLuma(auth_token=api_key)
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
@@ -221,17 +222,9 @@ class LumaVideoModify(ControlNode):
             self.append_value_to_parameter("status", f"Using input video: {video_url}\n")
             self.append_value_to_parameter("status", "Creating modification request...\n")
 
-            # Build request parameters
-            params = {
-                "media": {"url": video_url},
-                "model": model,
-                "mode": mode,
-                "generation_type": "modify_video",
-                "prompt": prompt.strip(),
-            }
-
-            self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
-            self.append_value_to_parameter("status", f"Using mode: {mode}\n")
+            # Build request parameters for the video_edit generation type.
+            # The old `mode` values (adhere_/flex_/reimagine_) map 1:1 to the edit strength.
+            video_options: dict = {"edit": {"strength": mode}}
 
             # Add optional first frame
             first_frame = self.get_parameter_value("first_frame")
@@ -245,11 +238,22 @@ class LumaVideoModify(ControlNode):
 
                 first_frame_url = self._public_first_frame_parameter.get_public_url_for_parameter()
                 if first_frame_url:
-                    params["first_frame"] = {"url": first_frame_url}
+                    video_options["start_frame"] = {"url": first_frame_url}
                     self.append_value_to_parameter("status", f"Using first frame: {first_frame_url}\n")
 
+            params = {
+                "type": "video_edit",
+                "prompt": prompt.strip(),
+                "model": model,
+                "source": {"url": video_url, "media_type": mimetypes.guess_type(video_url)[0] or "video/mp4"},
+                "video": video_options,
+            }
+
+            self.append_value_to_parameter("status", f"Using prompt: {prompt.strip()}\n")
+            self.append_value_to_parameter("status", f"Using mode: {mode}\n")
+
             # Create modify generation
-            generation = await client.generations.video.modify(**params)
+            generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
@@ -265,7 +269,7 @@ class LumaVideoModify(ControlNode):
                 await asyncio.sleep(3)
                 attempt += 1
 
-                generation = await client.generations.get(id=generation_id)
+                generation = await client.generations.get(generation_id=generation_id)
 
                 if generation.state == "completed":
                     completed = True
@@ -278,8 +282,8 @@ class LumaVideoModify(ControlNode):
             if not completed:
                 raise TimeoutError(f"Modification timed out after {max_attempts} attempts")
 
-            # Get video URL
-            video_url = generation.assets.video
+            # Get video URL from the generation output list
+            video_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading modified video...\n")
             video_bytes = self._download_video(video_url)
