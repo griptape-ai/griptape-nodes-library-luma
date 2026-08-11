@@ -1,9 +1,13 @@
 import asyncio
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
 from griptape.artifacts import ImageUrlArtifact, VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
+    ParameterList,
     ParameterMode,
     ParameterTypeBuiltin,
 )
@@ -19,6 +23,7 @@ from luma_agents import AsyncLuma
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
+MAX_KEYFRAMES = 64
 
 
 class LumaVideoGeneration(ControlNode):
@@ -26,6 +31,8 @@ class LumaVideoGeneration(ControlNode):
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
+
+        self._keyframe_uploaded_paths: list[Path] = []
 
         self.add_parameter(
             Parameter(
@@ -59,18 +66,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="16:9",
-                traits={
-                    Options(
-                        choices=[
-                            "1:1",
-                            "3:4",
-                            "4:3",
-                            "9:16",
-                            "16:9",
-                            "21:9",
-                        ]
-                    )
-                },
+                traits={Options(choices=["1:1", "3:4", "4:3", "9:16", "16:9", "21:9"])},
                 ui_options={"display_name": "Aspect Ratio"},
             )
         )
@@ -82,7 +78,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="720p",
-                traits={Options(choices=["360p", "540p", "720p", "1080p"])},
+                traits={Options(choices=["540p", "720p", "1080p"])},
                 ui_options={"display_name": "Resolution"},
             )
         )
@@ -99,38 +95,90 @@ class LumaVideoGeneration(ControlNode):
             )
         )
 
-        # Start frame with public URL support
+        self.add_parameter(
+            Parameter(
+                name="image_input_mode",
+                tooltip=(
+                    "How to anchor reference images to the video.\n"
+                    "none — text-to-video, no image anchors\n"
+                    "start_end_frame — anchor the first and/or last frame\n"
+                    "keyframes — place images at specific frame positions (mutually exclusive with loop; "
+                    "indexes are 0–120 for 5 s, 0–240 for 10 s at 24 fps)"
+                ),
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="none",
+                traits={Options(choices=["none", "start_end_frame", "keyframes"])},
+                ui_options={"display_name": "Image Input"},
+            )
+        )
+
+        # --- Start / End frame section (shown when image_input_mode == "start_end_frame") ---
         self._public_start_frame_parameter = PublicArtifactUrlParameter(
             node=self,
             artifact_url_parameter=Parameter(
                 name="start_frame",
-                tooltip="Optional: Starting frame image for image-to-video generation",
+                tooltip="Starting frame image for image-to-video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
+                ui_options={"hide": True},
             ),
             disclaimer_message="The Luma API service utilizes this URL to access the image for video generation.",
         )
         self._public_start_frame_parameter.add_input_parameters()
 
-        # End frame with public URL support
         self._public_end_frame_parameter = PublicArtifactUrlParameter(
             node=self,
             artifact_url_parameter=Parameter(
                 name="end_frame",
-                tooltip="Optional: Ending frame image for controlled video generation",
+                tooltip="Ending frame image for controlled video generation",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.OUTPUT},
+                ui_options={"hide": True},
             ),
             disclaimer_message="The Luma API service utilizes this URL to access the image for video generation.",
         )
         self._public_end_frame_parameter.add_input_parameters()
 
+        # --- Keyframes section (shown when image_input_mode == "keyframes") ---
+        # Two parallel lists: Nth image pairs with Nth index.
+        self._keyframe_images_list = ParameterList(
+            name="keyframe_images",
+            tooltip=(
+                "Keyframe image. Each entry pairs by position with the corresponding Keyframe Index.\n"
+                "Local images are automatically uploaded to Griptape Cloud for Luma API access."
+            ),
+            input_types=["ImageArtifact", "ImageUrlArtifact"],
+            type="ImageUrlArtifact",
+            allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            max_items=MAX_KEYFRAMES,
+            display_name="Keyframe Images",
+            hide=True,
+        )
+        self.add_parameter(self._keyframe_images_list)
+
+        self._keyframe_indexes_list = ParameterList(
+            name="keyframe_indexes",
+            tooltip=(
+                "Frame position for the paired keyframe image.\n"
+                "Range: 0–120 for 5 s video, 0–240 for 10 s video (24 fps). Values must be unique."
+            ),
+            type=ParameterTypeBuiltin.INT.value,
+            allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            default_value=0,
+            max_items=MAX_KEYFRAMES,
+            display_name="Keyframe Indexes",
+            hide=True,
+        )
+        self.add_parameter(self._keyframe_indexes_list)
+
+        # Loop — hidden when keyframes mode is active (mutually exclusive per API)
         self.add_parameter(
             Parameter(
                 name="loop",
-                tooltip="Whether to generate a looping video",
+                tooltip="Generate a seamlessly looping video (not available in keyframes mode)",
                 type=ParameterTypeBuiltin.BOOL.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value=False,
@@ -166,8 +214,25 @@ class LumaVideoGeneration(ControlNode):
         )
         self._output_file.add_parameter()
 
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        if parameter.name == "image_input_mode":
+            self._apply_image_input_mode(value)
+
+    def _apply_image_input_mode(self, mode: str) -> None:
+        if mode == "start_end_frame":
+            self.show_parameter_by_name(["start_frame", "end_frame"])
+            self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
+            self.show_parameter_by_name(["loop"])
+        elif mode == "keyframes":
+            self.hide_parameter_by_name(["start_frame", "end_frame"])
+            self.show_parameter_by_name(["keyframe_images", "keyframe_indexes"])
+            self.hide_parameter_by_name(["loop"])
+        else:  # "none"
+            self.hide_parameter_by_name(["start_frame", "end_frame"])
+            self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
+            self.show_parameter_by_name(["loop"])
+
     def _get_api_key(self) -> str:
-        """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             raise ValueError(
@@ -177,7 +242,6 @@ class LumaVideoGeneration(ControlNode):
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        """Validate node configuration before execution."""
         errors = []
 
         prompt = self.get_parameter_value("prompt")
@@ -191,6 +255,20 @@ class LumaVideoGeneration(ControlNode):
                     f"{self.name}: Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
                 )
             )
+
+        mode = self.get_parameter_value("image_input_mode")
+        if mode == "keyframes":
+            image_count = len(self._keyframe_images_list.get_child_parameters())
+            index_count = len(self._keyframe_indexes_list.get_child_parameters())
+            if image_count == 0:
+                errors.append(ValueError(f"{self.name}: Add at least one keyframe image when using keyframes mode."))
+            elif image_count != index_count:
+                errors.append(
+                    ValueError(
+                        f"{self.name}: Keyframe Images ({image_count}) and Keyframe Indexes ({index_count}) "
+                        "must have the same number of items."
+                    )
+                )
 
         return errors if errors else None
 
@@ -225,12 +303,11 @@ class LumaVideoGeneration(ControlNode):
             aspect_ratio = self.get_parameter_value("aspect_ratio")
             resolution = self.get_parameter_value("resolution")
             duration = self.get_parameter_value("duration")
-            loop_video = self.get_parameter_value("loop")
+            mode = self.get_parameter_value("image_input_mode")
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
-            # Build request parameters for the video generation type
-            params = {
+            params: dict = {
                 "type": "video",
                 "prompt": prompt.strip(),
                 "model": model,
@@ -239,53 +316,58 @@ class LumaVideoGeneration(ControlNode):
             if aspect_ratio:
                 params["aspect_ratio"] = aspect_ratio
 
-            # Video-specific output settings live under the `video` options object
             video_options: dict = {
                 "resolution": resolution,
                 "duration": duration,
             }
 
-            # Add loop if enabled
-            if loop_video:
-                video_options["loop"] = True
-                self.append_value_to_parameter("status", "Loop mode enabled\n")
+            if mode == "start_end_frame":
+                loop_video = self.get_parameter_value("loop")
+                if loop_video:
+                    video_options["loop"] = True
+                    self.append_value_to_parameter("status", "Loop mode enabled\n")
 
-            # Add optional start and end frames
-            start_frame = self.get_parameter_value("start_frame")
-            if start_frame:
-                # Convert serialized dicts back to artifacts if needed
-                if isinstance(start_frame, dict) and start_frame.get("value"):
-                    start_frame = ImageUrlArtifact(
-                        value=start_frame["value"], name=start_frame.get("name", "start_frame")
-                    )
-                    self.set_parameter_value("start_frame", start_frame)
+                start_frame = self.get_parameter_value("start_frame")
+                if start_frame:
+                    if isinstance(start_frame, dict) and start_frame.get("value"):
+                        start_frame = ImageUrlArtifact(
+                            value=start_frame["value"], name=start_frame.get("name", "start_frame")
+                        )
+                        self.set_parameter_value("start_frame", start_frame)
+                    start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
+                    if start_frame_url:
+                        video_options["start_frame"] = {"url": start_frame_url}
+                        self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
 
-                start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
-                if start_frame_url:
-                    video_options["start_frame"] = {"url": start_frame_url}
-                    self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
+                end_frame = self.get_parameter_value("end_frame")
+                if end_frame:
+                    if isinstance(end_frame, dict) and end_frame.get("value"):
+                        end_frame = ImageUrlArtifact(value=end_frame["value"], name=end_frame.get("name", "end_frame"))
+                        self.set_parameter_value("end_frame", end_frame)
+                    end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
+                    if end_frame_url:
+                        video_options["end_frame"] = {"url": end_frame_url}
+                        self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
 
-            end_frame = self.get_parameter_value("end_frame")
-            if end_frame:
-                # Convert serialized dicts back to artifacts if needed
-                if isinstance(end_frame, dict) and end_frame.get("value"):
-                    end_frame = ImageUrlArtifact(value=end_frame["value"], name=end_frame.get("name", "end_frame"))
-                    self.set_parameter_value("end_frame", end_frame)
+            elif mode == "keyframes":
+                keyframes, keyframe_indexes = self._build_keyframe_params()
+                if keyframes:
+                    video_options["keyframes"] = keyframes
+                    video_options["keyframe_indexes"] = keyframe_indexes
+                    self.append_value_to_parameter("status", f"Using {len(keyframes)} keyframe anchor(s)\n")
 
-                end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
-                if end_frame_url:
-                    video_options["end_frame"] = {"url": end_frame_url}
-                    self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
+            else:  # "none"
+                loop_video = self.get_parameter_value("loop")
+                if loop_video:
+                    video_options["loop"] = True
+                    self.append_value_to_parameter("status", "Loop mode enabled\n")
 
             params["video"] = video_options
 
-            # Create generation
             generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
-
-            # Poll for completion
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
             completed = False
@@ -309,13 +391,11 @@ class LumaVideoGeneration(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
-            # Download and save video from the generation output list
             video_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading generated video...\n")
             video_bytes = self._download_video(video_url)
 
-            # Save to project files
             dest = self._output_file.build_file()
             saved = dest.write_bytes(video_bytes)
 
@@ -337,9 +417,58 @@ class LumaVideoGeneration(ControlNode):
             # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
-            # Cleanup uploaded artifacts
             self._public_start_frame_parameter.delete_uploaded_artifact()
             self._public_end_frame_parameter.delete_uploaded_artifact()
+            self._cleanup_keyframe_uploads()
+
+    def _build_keyframe_params(self) -> tuple[list[dict], list[int]]:
+        """Build keyframes and keyframe_indexes arrays for the Luma API.
+
+        Reuses the storage driver from the start_frame PublicArtifactUrlParameter to
+        upload any local-URL images to Griptape Cloud so the Luma API can reach them.
+        """
+        image_children = self._keyframe_images_list.get_child_parameters()
+        index_children = self._keyframe_indexes_list.get_child_parameters()
+
+        self._keyframe_uploaded_paths = []
+        keyframes: list[dict] = []
+        keyframe_indexes: list[int] = []
+
+        storage_driver = self._public_start_frame_parameter._storage_driver
+
+        for img_param, idx_param in zip(image_children, index_children, strict=False):
+            img_value = self.get_parameter_value(img_param.name)
+            idx_value = self.get_parameter_value(idx_param.name)
+
+            if img_value is None:
+                continue
+
+            # Rehydrate serialized artifact dicts (e.g. after workflow load)
+            if isinstance(img_value, dict) and img_value.get("value"):
+                img_value = ImageUrlArtifact(value=img_value["value"], name=img_value.get("name", "keyframe"))
+
+            url = img_value.value if isinstance(img_value, ImageUrlArtifact) else str(img_value)
+
+            # Upload localhost / local-path URLs so the Luma API can reach them
+            if not (url.startswith(("http://", "https://")) and "localhost" not in url):
+                file_contents = File(url).read_bytes()
+                filename = Path(urlparse(url).path).name
+                gtc_path = Path("artifact_url_storage") / uuid4().hex / filename
+                url = storage_driver.upload_file(path=gtc_path, file_content=file_contents)
+                self._keyframe_uploaded_paths.append(gtc_path)
+
+            keyframes.append({"url": url})
+            keyframe_indexes.append(int(idx_value) if idx_value is not None else 0)
+
+        return keyframes, keyframe_indexes
+
+    def _cleanup_keyframe_uploads(self) -> None:
+        if not self._keyframe_uploaded_paths:
+            return
+        storage_driver = self._public_start_frame_parameter._storage_driver
+        for path in self._keyframe_uploaded_paths:
+            storage_driver.delete_file(path)
+        self._keyframe_uploaded_paths = []
 
     def _download_video(self, video_url: str) -> bytes:
         """Download video from URL and return bytes."""
