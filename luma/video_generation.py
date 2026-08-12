@@ -1,8 +1,6 @@
 import asyncio
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from uuid import uuid4
 
 from griptape.artifacts import ImageUrlArtifact, VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
@@ -17,10 +15,12 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 )
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.connection_events import DeleteConnectionRequest
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
+
+from utils.connection_utils import disconnect_incoming, disconnect_param_list_incoming
+from utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
@@ -230,45 +230,24 @@ class LumaVideoGeneration(ControlNode):
         if parameter.name == "image_input_mode":
             self._apply_image_input_mode(value)
 
-    def _disconnect_incoming(self, param_name: str) -> None:
-        """Disconnect all incoming connections to a named parameter on this node."""
-        param = self.get_parameter_by_name(param_name)
-        if param is None:
-            return
-        conns = GriptapeNodes.FlowManager().get_connections().get_incoming_connections_to_parameter(self, param)
-        for conn in conns:
-            GriptapeNodes.handle_request(
-                DeleteConnectionRequest(
-                    source_node_name=conn.source_node.name,
-                    source_parameter_name=conn.source_parameter.name,
-                    target_node_name=self.name,
-                    target_parameter_name=param_name,
-                )
-            )
-
-    def _disconnect_param_list_incoming(self, param_list: ParameterList) -> None:
-        """Disconnect all incoming connections to every child of a ParameterList."""
-        for child in param_list.get_child_parameters():
-            self._disconnect_incoming(child.name)
-
     def _apply_image_input_mode(self, mode: str) -> None:
         if mode == "start_end_frame":
-            self._disconnect_param_list_incoming(self._keyframe_images_list)
-            self._disconnect_param_list_incoming(self._keyframe_indexes_list)
+            disconnect_param_list_incoming(self, self._keyframe_images_list)
+            disconnect_param_list_incoming(self, self._keyframe_indexes_list)
             self.show_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
         elif mode == "keyframes":
-            self._disconnect_incoming("start_frame")
-            self._disconnect_incoming("end_frame")
+            disconnect_incoming(self, "start_frame")
+            disconnect_incoming(self, "end_frame")
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.show_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.hide_parameter_by_name(["loop"])
         else:  # "none"
-            self._disconnect_incoming("start_frame")
-            self._disconnect_incoming("end_frame")
-            self._disconnect_param_list_incoming(self._keyframe_images_list)
-            self._disconnect_param_list_incoming(self._keyframe_indexes_list)
+            disconnect_incoming(self, "start_frame")
+            disconnect_incoming(self, "end_frame")
+            disconnect_param_list_incoming(self, self._keyframe_images_list)
+            disconnect_param_list_incoming(self, self._keyframe_indexes_list)
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
@@ -472,52 +451,24 @@ class LumaVideoGeneration(ControlNode):
             self._cleanup_keyframe_uploads()
 
     def _build_keyframe_params(self) -> tuple[list[dict], list[int]]:
-        """Build keyframes and keyframe_indexes arrays for the Luma API.
-
-        Reuses the storage driver from the start_frame PublicArtifactUrlParameter to
-        upload any local-URL images to Griptape Cloud so the Luma API can reach them.
-        """
+        """Build keyframes and keyframe_indexes arrays for the Luma API."""
         image_children = self._keyframe_images_list.get_child_parameters()
         index_children = self._keyframe_indexes_list.get_child_parameters()
-
-        self._keyframe_uploaded_paths = []
-        keyframes: list[dict] = []
-        keyframe_indexes: list[int] = []
-
         storage_driver = self._public_start_frame_parameter._storage_driver
 
+        valid_image_names: list[str] = []
+        valid_indexes: list[int] = []
         for img_param, idx_param in zip(image_children, index_children, strict=False):
-            img_value = self.get_parameter_value(img_param.name)
-            idx_value = self.get_parameter_value(idx_param.name)
+            if self.get_parameter_value(img_param.name) is not None:
+                valid_image_names.append(img_param.name)
+                idx_value = self.get_parameter_value(idx_param.name)
+                valid_indexes.append(int(idx_value) if idx_value is not None else 0)
 
-            if img_value is None:
-                continue
-
-            # Rehydrate serialized artifact dicts (e.g. after workflow load)
-            if isinstance(img_value, dict) and img_value.get("value"):
-                img_value = ImageUrlArtifact(value=img_value["value"], name=img_value.get("name", "keyframe"))
-
-            url = img_value.value if isinstance(img_value, ImageUrlArtifact) else str(img_value)
-
-            # Upload localhost / local-path URLs so the Luma API can reach them
-            if not (url.startswith(("http://", "https://")) and "localhost" not in url):
-                file_contents = File(url).read_bytes()
-                filename = Path(urlparse(url).path).name
-                gtc_path = Path("artifact_url_storage") / uuid4().hex / filename
-                url = storage_driver.upload_file(path=gtc_path, file_content=file_contents)
-                self._keyframe_uploaded_paths.append(gtc_path)
-
-            keyframes.append({"url": url})
-            keyframe_indexes.append(int(idx_value) if idx_value is not None else 0)
-
-        return keyframes, keyframe_indexes
+        keyframes, self._keyframe_uploaded_paths = build_public_url_list(self, valid_image_names, storage_driver)
+        return keyframes, valid_indexes
 
     def _cleanup_keyframe_uploads(self) -> None:
-        if not self._keyframe_uploaded_paths:
-            return
-        storage_driver = self._public_start_frame_parameter._storage_driver
-        for path in self._keyframe_uploaded_paths:
-            storage_driver.delete_file(path)
+        cleanup_uploaded_paths(self._public_start_frame_parameter._storage_driver, self._keyframe_uploaded_paths)
         self._keyframe_uploaded_paths = []
 
     def _download_video(self, video_url: str) -> bytes:

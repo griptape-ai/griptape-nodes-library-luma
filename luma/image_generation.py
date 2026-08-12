@@ -1,8 +1,6 @@
 import asyncio
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from uuid import uuid4
 
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
@@ -17,10 +15,12 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 )
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
-from griptape_nodes.retained_mode.events.connection_events import DeleteConnectionRequest
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
+
+from utils.connection_utils import disconnect_incoming, disconnect_param_list_incoming
+from utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
@@ -176,72 +176,29 @@ class LumaImageGeneration(ControlNode):
         if parameter.name == "reference_type":
             self._apply_reference_type(value)
 
-    def _disconnect_incoming(self, param_name: str) -> None:
-        param = self.get_parameter_by_name(param_name)
-        if param is None:
-            return
-        conns = GriptapeNodes.FlowManager().get_connections().get_incoming_connections_to_parameter(self, param)
-        for conn in conns:
-            GriptapeNodes.handle_request(
-                DeleteConnectionRequest(
-                    source_node_name=conn.source_node.name,
-                    source_parameter_name=conn.source_parameter.name,
-                    target_node_name=self.name,
-                    target_parameter_name=param_name,
-                )
-            )
-
-    def _disconnect_param_list_incoming(self, param_list: ParameterList) -> None:
-        for child in param_list.get_child_parameters():
-            self._disconnect_incoming(child.name)
-
     def _apply_reference_type(self, mode: str) -> None:
         if mode == "image_reference":
-            self._disconnect_incoming("reference_image")
+            disconnect_incoming(self, "reference_image")
             self.hide_parameter_by_name(["reference_image"])
             self.show_parameter_by_name(["image_refs"])
         elif mode == "modify_image":
-            self._disconnect_param_list_incoming(self._image_refs_list)
+            disconnect_param_list_incoming(self, self._image_refs_list)
             self.hide_parameter_by_name(["image_refs"])
             self.show_parameter_by_name(["reference_image"])
         else:  # "none"
-            self._disconnect_incoming("reference_image")
-            self._disconnect_param_list_incoming(self._image_refs_list)
+            disconnect_incoming(self, "reference_image")
+            disconnect_param_list_incoming(self, self._image_refs_list)
             self.hide_parameter_by_name(["reference_image", "image_refs"])
 
     def _build_image_ref_params(self) -> list[dict]:
         """Build image_ref array for the Luma API, uploading local images as needed."""
-        children = self._image_refs_list.get_child_parameters()
-        self._image_ref_uploaded_paths = []
-        refs: list[dict] = []
+        param_names = [p.name for p in self._image_refs_list.get_child_parameters()]
         storage_driver = self._public_reference_image_parameter._storage_driver
-
-        for child in children:
-            img_value = self.get_parameter_value(child.name)
-            if img_value is None:
-                continue
-            if isinstance(img_value, dict) and img_value.get("value"):
-                img_value = ImageUrlArtifact(value=img_value["value"], name=img_value.get("name", "ref"))
-
-            url = img_value.value if isinstance(img_value, ImageUrlArtifact) else str(img_value)
-
-            if not (url.startswith(("http://", "https://")) and "localhost" not in url):
-                file_contents = File(url).read_bytes()
-                filename = Path(urlparse(url).path).name
-                gtc_path = Path("artifact_url_storage") / uuid4().hex / filename
-                url = storage_driver.upload_file(path=gtc_path, file_content=file_contents)
-                self._image_ref_uploaded_paths.append(gtc_path)
-
-            refs.append({"url": url})
-
+        refs, self._image_ref_uploaded_paths = build_public_url_list(self, param_names, storage_driver)
         return refs
 
     def _cleanup_image_ref_uploads(self) -> None:
-        if not self._image_ref_uploaded_paths:
-            return
-        storage_driver = self._public_reference_image_parameter._storage_driver
-        for path in self._image_ref_uploaded_paths:
-            storage_driver.delete_file(path)
+        cleanup_uploaded_paths(self._public_reference_image_parameter._storage_driver, self._image_ref_uploaded_paths)
         self._image_ref_uploaded_paths = []
 
     def _get_api_key(self) -> str:
