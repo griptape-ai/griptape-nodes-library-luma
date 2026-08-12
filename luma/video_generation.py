@@ -17,6 +17,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 )
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
+from griptape_nodes.retained_mode.events.connection_events import DeleteConnectionRequest
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
@@ -218,16 +219,45 @@ class LumaVideoGeneration(ControlNode):
         if parameter.name == "image_input_mode":
             self._apply_image_input_mode(value)
 
+    def _disconnect_incoming(self, param_name: str) -> None:
+        """Disconnect all incoming connections to a named parameter on this node."""
+        param = self.get_parameter_by_name(param_name)
+        if param is None:
+            return
+        conns = GriptapeNodes.FlowManager().get_connections().get_incoming_connections_to_parameter(self, param)
+        for conn in conns:
+            GriptapeNodes.handle_request(
+                DeleteConnectionRequest(
+                    source_node_name=conn.source_node.name,
+                    source_parameter_name=conn.source_parameter.name,
+                    target_node_name=self.name,
+                    target_parameter_name=param_name,
+                )
+            )
+
+    def _disconnect_param_list_incoming(self, param_list: ParameterList) -> None:
+        """Disconnect all incoming connections to every child of a ParameterList."""
+        for child in param_list.get_child_parameters():
+            self._disconnect_incoming(child.name)
+
     def _apply_image_input_mode(self, mode: str) -> None:
         if mode == "start_end_frame":
+            self._disconnect_param_list_incoming(self._keyframe_images_list)
+            self._disconnect_param_list_incoming(self._keyframe_indexes_list)
             self.show_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
         elif mode == "keyframes":
+            self._disconnect_incoming("start_frame")
+            self._disconnect_incoming("end_frame")
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.show_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.hide_parameter_by_name(["loop"])
         else:  # "none"
+            self._disconnect_incoming("start_frame")
+            self._disconnect_incoming("end_frame")
+            self._disconnect_param_list_incoming(self._keyframe_images_list)
+            self._disconnect_param_list_incoming(self._keyframe_indexes_list)
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
