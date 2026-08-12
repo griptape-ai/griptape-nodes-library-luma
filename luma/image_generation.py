@@ -1,9 +1,13 @@
 import asyncio
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
 
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
     Parameter,
+    ParameterList,
     ParameterMode,
     ParameterTypeBuiltin,
 )
@@ -13,6 +17,7 @@ from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_
 )
 from griptape_nodes.exe_types.param_components.project_file_parameter import ProjectFileParameter
 from griptape_nodes.files.file import File
+from griptape_nodes.retained_mode.events.connection_events import DeleteConnectionRequest
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
@@ -24,8 +29,12 @@ API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 class LumaImageGeneration(ControlNode):
     """Luma Labs image generation node supporting text-to-image, image references, and image editing."""
 
+    MAX_IMAGE_REFS = 9
+
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
+
+        self._image_ref_uploaded_paths: list[Path] = []
 
         self.add_parameter(
             Parameter(
@@ -95,12 +104,29 @@ class LumaImageGeneration(ControlNode):
             )
         )
 
-        # Reference image with public URL support
+        # --- image_reference mode: up to 9 images sent as image_ref array ---
+        self._image_refs_list = ParameterList(
+            name="image_refs",
+            tooltip=(
+                "Reference images for guided generation. Each image influences the style or content of the output.\n"
+                "Local images are automatically uploaded to Griptape Cloud for Luma API access.\n"
+                "Up to 9 images supported."
+            ),
+            input_types=["ImageArtifact", "ImageUrlArtifact"],
+            type="ImageUrlArtifact",
+            allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            max_items=self.MAX_IMAGE_REFS,
+            display_name="Reference Images",
+            hide=True,
+        )
+        self.add_parameter(self._image_refs_list)
+
+        # --- modify_image mode: single source image sent as source ---
         self._public_reference_image_parameter = PublicArtifactUrlParameter(
             node=self,
             artifact_url_parameter=Parameter(
                 name="reference_image",
-                tooltip="Optional: Reference image (type determined by Reference Type above)",
+                tooltip="Source image to edit (used in Modify Image mode)",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
@@ -147,15 +173,78 @@ class LumaImageGeneration(ControlNode):
         self._output_file.add_parameter()
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        """Update parameter visibility when reference type changes."""
         if parameter.name == "reference_type":
-            if value == "none":
-                self.hide_parameter_by_name(["reference_image"])
-            else:
-                self.show_parameter_by_name(["reference_image"])
+            self._apply_reference_type(value)
+
+    def _disconnect_incoming(self, param_name: str) -> None:
+        param = self.get_parameter_by_name(param_name)
+        if param is None:
+            return
+        conns = GriptapeNodes.FlowManager().get_connections().get_incoming_connections_to_parameter(self, param)
+        for conn in conns:
+            GriptapeNodes.handle_request(
+                DeleteConnectionRequest(
+                    source_node_name=conn.source_node.name,
+                    source_parameter_name=conn.source_parameter.name,
+                    target_node_name=self.name,
+                    target_parameter_name=param_name,
+                )
+            )
+
+    def _disconnect_param_list_incoming(self, param_list: ParameterList) -> None:
+        for child in param_list.get_child_parameters():
+            self._disconnect_incoming(child.name)
+
+    def _apply_reference_type(self, mode: str) -> None:
+        if mode == "image_reference":
+            self._disconnect_incoming("reference_image")
+            self.hide_parameter_by_name(["reference_image"])
+            self.show_parameter_by_name(["image_refs"])
+        elif mode == "modify_image":
+            self._disconnect_param_list_incoming(self._image_refs_list)
+            self.hide_parameter_by_name(["image_refs"])
+            self.show_parameter_by_name(["reference_image"])
+        else:  # "none"
+            self._disconnect_incoming("reference_image")
+            self._disconnect_param_list_incoming(self._image_refs_list)
+            self.hide_parameter_by_name(["reference_image", "image_refs"])
+
+    def _build_image_ref_params(self) -> list[dict]:
+        """Build image_ref array for the Luma API, uploading local images as needed."""
+        children = self._image_refs_list.get_child_parameters()
+        self._image_ref_uploaded_paths = []
+        refs: list[dict] = []
+        storage_driver = self._public_reference_image_parameter._storage_driver
+
+        for child in children:
+            img_value = self.get_parameter_value(child.name)
+            if img_value is None:
+                continue
+            if isinstance(img_value, dict) and img_value.get("value"):
+                img_value = ImageUrlArtifact(value=img_value["value"], name=img_value.get("name", "ref"))
+
+            url = img_value.value if isinstance(img_value, ImageUrlArtifact) else str(img_value)
+
+            if not (url.startswith(("http://", "https://")) and "localhost" not in url):
+                file_contents = File(url).read_bytes()
+                filename = Path(urlparse(url).path).name
+                gtc_path = Path("artifact_url_storage") / uuid4().hex / filename
+                url = storage_driver.upload_file(path=gtc_path, file_content=file_contents)
+                self._image_ref_uploaded_paths.append(gtc_path)
+
+            refs.append({"url": url})
+
+        return refs
+
+    def _cleanup_image_ref_uploads(self) -> None:
+        if not self._image_ref_uploaded_paths:
+            return
+        storage_driver = self._public_reference_image_parameter._storage_driver
+        for path in self._image_ref_uploaded_paths:
+            storage_driver.delete_file(path)
+        self._image_ref_uploaded_paths = []
 
     def _get_api_key(self) -> str:
-        """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
             raise ValueError(
@@ -225,39 +314,35 @@ class LumaImageGeneration(ControlNode):
             # Add reference image based on selected type
             reference_type = self.get_parameter_value("reference_type")
 
-            if reference_type != "none":
-                # Convert serialized dict back to artifact if needed
-                reference_image = self.get_parameter_value("reference_image")
+            if reference_type == "image_reference":
+                image_refs = self._build_image_ref_params()
+                if image_refs:
+                    params["image_ref"] = image_refs
+                    self.append_value_to_parameter("status", f"Using {len(image_refs)} reference image(s)\n")
+                else:
+                    self.append_value_to_parameter(
+                        "status",
+                        "⚠️ Reference type set to 'image_reference' but no images provided. Proceeding without reference.\n",
+                    )
 
-                # Only process if we have a reference image
+            elif reference_type == "modify_image":
+                reference_image = self.get_parameter_value("reference_image")
                 if not reference_image:
                     self.append_value_to_parameter(
                         "status",
-                        f"⚠️ Reference type set to '{reference_type}' but no reference image provided. Proceeding without reference.\n",
+                        "⚠️ Reference type set to 'modify_image' but no source image provided. Proceeding without reference.\n",
                     )
                 else:
                     if isinstance(reference_image, dict) and reference_image.get("value"):
-                        # Create proper artifact from serialized dict
                         reference_image = ImageUrlArtifact(
                             value=reference_image["value"], name=reference_image.get("name", "reference_image")
                         )
-                        # Update the parameter with the artifact object
                         self.set_parameter_value("reference_image", reference_image)
-
-                    # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     reference_url = self._public_reference_image_parameter.get_public_url_for_parameter()
-
                     if reference_url:
-                        if reference_type == "image_reference":
-                            # Reference image guides a fresh generation
-                            params["image_ref"] = [{"url": reference_url}]
-                            self.append_value_to_parameter("status", f"Using image reference: {reference_url}\n")
-
-                        elif reference_type == "modify_image":
-                            # Edit the reference image directly
-                            params["type"] = "image_edit"
-                            params["source"] = {"url": reference_url}
-                            self.append_value_to_parameter("status", f"Modifying image: {reference_url}\n")
+                        params["type"] = "image_edit"
+                        params["source"] = {"url": reference_url}
+                        self.append_value_to_parameter("status", f"Modifying image: {reference_url}\n")
 
             # Create generation
             generation = await client.generations.create(**params)
@@ -316,8 +401,8 @@ class LumaImageGeneration(ControlNode):
             # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
-            # Cleanup uploaded artifacts
             self._public_reference_image_parameter.delete_uploaded_artifact()
+            self._cleanup_image_ref_uploads()
 
     def _download_image(self, image_url: str) -> bytes:
         """Download image from URL and return bytes."""
