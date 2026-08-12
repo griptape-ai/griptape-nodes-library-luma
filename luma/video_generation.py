@@ -189,6 +189,17 @@ class LumaVideoGeneration(ControlNode):
 
         self.add_parameter(
             Parameter(
+                name="hdr",
+                tooltip="Enable HDR-encoded MP4 output. Requires 720p or 1080p resolution.",
+                type=ParameterTypeBuiltin.BOOL.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value=False,
+                ui_options={"display_name": "HDR Output"},
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
                 name="video",
                 tooltip="Generated video",
                 output_type="VideoUrlArtifact",
@@ -286,6 +297,9 @@ class LumaVideoGeneration(ControlNode):
                 )
             )
 
+        if self.get_parameter_value("hdr") and self.get_parameter_value("resolution") == "540p":
+            errors.append(ValueError(f"{self.name}: HDR requires 720p or 1080p resolution."))
+
         mode = self.get_parameter_value("image_input_mode")
         if mode == "keyframes":
             image_count = len(self._keyframe_images_list.get_child_parameters())
@@ -346,10 +360,16 @@ class LumaVideoGeneration(ControlNode):
             if aspect_ratio:
                 params["aspect_ratio"] = aspect_ratio
 
+            hdr = self.get_parameter_value("hdr")
+
             video_options: dict = {
                 "resolution": resolution,
                 "duration": duration,
             }
+
+            if hdr:
+                video_options["hdr"] = True
+                self.append_value_to_parameter("status", "HDR output enabled\n")
 
             if mode == "start_end_frame":
                 loop_video = self.get_parameter_value("loop")
