@@ -18,17 +18,16 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
-from utils.connection_utils import disconnect_param_list_incoming
 from utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
-class LumaImageGeneration(ControlNode):
-    """Generate images with Luma Labs using text prompts and optional style/content reference images."""
+class LumaImageEdit(ControlNode):
+    """Edit a source image with Luma Labs AI using a prompt and optional additional reference images."""
 
-    MAX_IMAGE_REFS = 9
+    MAX_IMAGE_REFS = 8
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
         super().__init__(name, metadata)
@@ -38,12 +37,12 @@ class LumaImageGeneration(ControlNode):
         self.add_parameter(
             Parameter(
                 name="prompt",
-                tooltip="Text description of the desired image",
+                tooltip="Text description of the desired edit",
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 ui_options={
                     "multiline": True,
-                    "placeholder_text": "Describe the image you want to generate...",
+                    "placeholder_text": "Describe how to edit the image...",
                 },
             )
         )
@@ -60,81 +59,49 @@ class LumaImageGeneration(ControlNode):
             )
         )
 
-        self.add_parameter(
-            Parameter(
-                name="aspect_ratio",
-                tooltip="Desired aspect ratio for the generated image",
-                type=ParameterTypeBuiltin.STR.value,
+        # Source image — required. Aspect ratio is derived from the source image by the API.
+        self._public_source_parameter = PublicArtifactUrlParameter(
+            node=self,
+            artifact_url_parameter=Parameter(
+                name="source_image",
+                tooltip="Source image to edit. The output aspect ratio is derived from this image.",
+                input_types=["ImageArtifact", "ImageUrlArtifact"],
+                type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="16:9",
-                traits={
-                    Options(
-                        choices=[
-                            "1:1",
-                            "3:4",
-                            "4:3",
-                            "9:16",
-                            "16:9",
-                            "21:9",
-                        ]
-                    )
+                ui_options={
+                    "clickable_file_browser": True,
+                    "expander": True,
+                    "file_browser_options": {
+                        "extensions": [".png", ".jpg", ".jpeg"],
+                        "allow_multiple": False,
+                    },
+                    "display_name": "Source Image",
                 },
-                ui_options={"display_name": "Aspect Ratio"},
-            )
+            ),
+            disclaimer_message="The Luma API service utilizes this URL to access the source image for editing.",
         )
+        self._public_source_parameter.add_input_parameters()
 
-        self.add_parameter(
-            Parameter(
-                name="reference_type",
-                tooltip="Use reference images to guide style and content of the generated image.",
-                type=ParameterTypeBuiltin.STR.value,
-                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
-                default_value="none",
-                traits={
-                    Options(
-                        choices=[
-                            "none",
-                            "image_reference",
-                        ]
-                    )
-                },
-                ui_options={"display_name": "Reference Type"},
-            )
-        )
-
-        # --- image_reference mode: up to 9 images sent as image_ref array ---
+        # Optional additional reference images to guide the edit (up to 8)
         self._image_refs_list = ParameterList(
             name="image_refs",
             tooltip=(
-                "Reference images for guided generation. Each image influences the style or content of the output.\n"
+                "Optional additional reference images to guide the edit.\n"
                 "Local images are automatically uploaded to Griptape Cloud for Luma API access.\n"
-                "Up to 9 images supported."
+                "Up to 8 images supported."
             ),
             input_types=["ImageArtifact", "ImageUrlArtifact"],
             type="ImageUrlArtifact",
             allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             max_items=self.MAX_IMAGE_REFS,
-            display_name="Reference Images",
-            hide=True,
+            display_name="Additional References",
         )
         self.add_parameter(self._image_refs_list)
-
-        # Internal: not exposed as a node parameter — used only for GTC storage driver access
-        # when uploading image_refs list items.
-        self._public_reference_image_parameter = PublicArtifactUrlParameter(
-            node=self,
-            artifact_url_parameter=Parameter(
-                name="_image_ref_storage",
-                type="ImageUrlArtifact",
-                allowed_modes=set(),
-            ),
-            disclaimer_message="",
-        )
 
         self.add_parameter(
             Parameter(
                 name="image",
-                tooltip="Generated image",
+                tooltip="Edited image",
                 output_type="ImageUrlArtifact",
                 allowed_modes={ParameterMode.PROPERTY, ParameterMode.OUTPUT},
                 ui_options={"pulse_on_run": True},
@@ -155,30 +122,19 @@ class LumaImageGeneration(ControlNode):
         self._output_file = ProjectFileParameter(
             node=self,
             name="output_file",
-            default_filename="luma_image.jpg",
+            default_filename="luma_image_edit.jpg",
         )
         self._output_file.add_parameter()
-
-    def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        if parameter.name == "reference_type":
-            self._apply_reference_type(value)
-
-    def _apply_reference_type(self, mode: str) -> None:
-        if mode == "image_reference":
-            self.show_parameter_by_name(["image_refs"])
-        else:  # "none"
-            disconnect_param_list_incoming(self, self._image_refs_list)
-            self.hide_parameter_by_name(["image_refs"])
 
     def _build_image_ref_params(self) -> list[dict]:
         """Build image_ref array for the Luma API, uploading local images as needed."""
         param_names = [p.name for p in self._image_refs_list.get_child_parameters()]
-        storage_driver = self._public_reference_image_parameter._storage_driver
+        storage_driver = self._public_source_parameter._storage_driver
         refs, self._image_ref_uploaded_paths = build_public_url_list(self, param_names, storage_driver)
         return refs
 
     def _cleanup_image_ref_uploads(self) -> None:
-        cleanup_uploaded_paths(self._public_reference_image_parameter._storage_driver, self._image_ref_uploaded_paths)
+        cleanup_uploaded_paths(self._public_source_parameter._storage_driver, self._image_ref_uploaded_paths)
         self._image_ref_uploaded_paths = []
 
     def _get_api_key(self) -> str:
@@ -191,12 +147,7 @@ class LumaImageGeneration(ControlNode):
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        """Validate node configuration before execution."""
         errors = []
-
-        prompt = self.get_parameter_value("prompt")
-        if not prompt:
-            errors.append(ValueError(f"{self.name}: Provide a prompt for image generation."))
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
@@ -206,17 +157,19 @@ class LumaImageGeneration(ControlNode):
                 )
             )
 
+        source_image = self.get_parameter_value("source_image")
+        if not source_image:
+            errors.append(ValueError(f"{self.name}: A source image is required for image editing."))
+
         return errors if errors else None
 
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
     def process(self) -> AsyncResult[None]:
-        """Non-blocking entry point for Griptape engine."""
         yield lambda: self._process_sync()
 
     def _process_sync(self) -> None:
-        """Synchronous wrapper that runs async code."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -225,50 +178,46 @@ class LumaImageGeneration(ControlNode):
             loop.close()
 
     async def _process_async(self) -> None:
-        """Generate image using Luma async API."""
+        """Edit image using Luma async API."""
         client = None
         try:
             api_key = self._get_api_key()
             client = AsyncLuma(auth_token=api_key)
 
-            prompt = self.get_parameter_value("prompt")
-            if not prompt:
-                raise ValueError("Prompt is required and cannot be empty")
-
+            prompt = self.get_parameter_value("prompt") or ""
             model = self.get_parameter_value("model")
-            aspect_ratio = self.get_parameter_value("aspect_ratio")
 
-            self.append_value_to_parameter("status", "Creating generation request...\n")
+            self.append_value_to_parameter("status", "Uploading source image...\n")
+            source_image_val = self.get_parameter_value("source_image")
+            if isinstance(source_image_val, dict) and source_image_val.get("value"):
+                source_image_val = ImageUrlArtifact(
+                    value=source_image_val["value"], name=source_image_val.get("name", "source_image")
+                )
+                self.set_parameter_value("source_image", source_image_val)
+            source_url = self._public_source_parameter.get_public_url_for_parameter()
+            if not source_url:
+                raise ValueError("Source image is required and could not be resolved to a URL.")
 
-            # Build request parameters. Default to a text-to-image generation.
-            params = {
-                "type": "image",
-                "prompt": prompt.strip(),
+            self.append_value_to_parameter("status", "Creating edit request...\n")
+
+            params: dict[str, Any] = {
+                "type": "image_edit",
                 "model": model,
-                "aspect_ratio": aspect_ratio,
+                "source": {"url": source_url},
             }
 
-            # Add reference image based on selected type
-            reference_type = self.get_parameter_value("reference_type")
+            if prompt.strip():
+                params["prompt"] = prompt.strip()
 
-            if reference_type == "image_reference":
-                image_refs = self._build_image_ref_params()
-                if image_refs:
-                    params["image_ref"] = image_refs
-                    self.append_value_to_parameter("status", f"Using {len(image_refs)} reference image(s)\n")
-                else:
-                    self.append_value_to_parameter(
-                        "status",
-                        "⚠️ Reference type set to 'image_reference' but no images provided. Proceeding without reference.\n",
-                    )
+            image_refs = self._build_image_ref_params()
+            if image_refs:
+                params["image_ref"] = image_refs
+                self.append_value_to_parameter("status", f"Using {len(image_refs)} additional reference image(s)\n")
 
-            # Create generation
             generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
-
-            # Poll for completion
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
             completed = False
@@ -278,7 +227,6 @@ class LumaImageGeneration(ControlNode):
             while not completed and attempt < max_attempts:
                 await asyncio.sleep(2)
                 attempt += 1
-
                 generation = await client.generations.get(generation_id=generation_id)
 
                 if generation.state == "completed":
@@ -292,13 +240,11 @@ class LumaImageGeneration(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
-            # Download and save image from the generation output list
             image_url = generation.output[0].url
 
-            self.append_value_to_parameter("status", "Downloading generated image...\n")
-            image_bytes = self._download_image(image_url)
+            self.append_value_to_parameter("status", "Downloading edited image...\n")
+            image_bytes = File(image_url).read_bytes()
 
-            # Save to project files
             dest = self._output_file.build_file()
             saved = dest.write_bytes(image_bytes)
 
@@ -307,20 +253,14 @@ class LumaImageGeneration(ControlNode):
 
             self.append_value_to_parameter(
                 "status",
-                f"✅ Generation completed successfully!\nOriginal URL: {image_url}\n",
+                f"✅ Edit completed successfully!\nOriginal URL: {image_url}\n",
             )
 
         except Exception as e:
-            error_msg = f"❌ Generation failed: {str(e)}\n"
-            self.append_value_to_parameter("status", error_msg)
+            self.append_value_to_parameter("status", f"❌ Edit failed: {str(e)}\n")
             raise
         finally:
-            # Close the async client while the event loop is still alive to avoid
-            # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
+            self._public_source_parameter.delete_uploaded_artifact()
             self._cleanup_image_ref_uploads()
-
-    def _download_image(self, image_url: str) -> bytes:
-        """Download image from URL and return bytes."""
-        return File(image_url).read_bytes()

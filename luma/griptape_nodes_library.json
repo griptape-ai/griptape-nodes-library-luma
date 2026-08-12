@@ -57,8 +57,26 @@
             "file_path": "image_generation.py",
             "metadata": {
                 "category": "image/luma",
-                "description": "Generate high-quality images using Luma Agents models with support for text-to-image, image references, and image editing",
+                "description": "Generate high-quality images using Luma Agents models with support for text-to-image and image reference guidance",
                 "display_name": "Luma Image Generation"
+            }
+        },
+        {
+            "class_name": "LumaImageEdit",
+            "file_path": "image_edit.py",
+            "metadata": {
+                "category": "image/luma",
+                "description": "Edit a source image using Luma Agents AI with a prompt and optional additional reference images",
+                "display_name": "Luma Image Edit"
+            }
+        },
+        {
+            "class_name": "LumaImageLayer",
+            "file_path": "image_layer.py",
+            "metadata": {
+                "category": "image/luma",
+                "description": "Decompose a source image into semantic RGBA PNG layers using the Luma Labs layering API",
+                "display_name": "Luma Image Layer"
             }
         },
         {
