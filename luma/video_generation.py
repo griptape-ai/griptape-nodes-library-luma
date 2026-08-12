@@ -79,7 +79,7 @@ class LumaVideoGeneration(ControlNode):
                 type=ParameterTypeBuiltin.STR.value,
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 default_value="720p",
-                traits={Options(choices=["540p", "720p", "1080p"])},
+                traits={Options(choices=["360p","540p", "720p", "1080p"])},
                 ui_options={"display_name": "Resolution"},
             )
         )
