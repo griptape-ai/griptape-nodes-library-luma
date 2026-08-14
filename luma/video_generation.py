@@ -9,7 +9,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
+from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
@@ -26,7 +26,7 @@ API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 MAX_KEYFRAMES = 64
 
 
-class LumaVideoGeneration(ControlNode):
+class LumaVideoGeneration(SuccessFailureNode):
     """Luma Labs Ray video generation node supporting text-to-video and image-to-video."""
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
@@ -225,6 +225,7 @@ class LumaVideoGeneration(ControlNode):
             default_filename="luma_video.mp4",
         )
         self._output_file.add_parameter()
+        self._create_status_parameters()
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         if parameter.name == "image_input_mode":
@@ -300,6 +301,7 @@ class LumaVideoGeneration(ControlNode):
 
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
+        self._clear_execution_status()
         yield lambda: self._process_sync()
 
     def _process_sync(self) -> None:
@@ -448,11 +450,12 @@ class LumaVideoGeneration(ControlNode):
                 "status",
                 f"✅ Generation completed successfully!\nOriginal URL: {video_url}\n",
             )
+            self._set_status_results(was_successful=True, result_details="Generation completed successfully.")
 
         except Exception as e:
-            error_msg = f"❌ Generation failed: {str(e)}\n"
-            self.append_value_to_parameter("status", error_msg)
-            raise
+            self.append_value_to_parameter("status", f"❌ Generation failed: {str(e)}\n")
+            self._set_status_results(was_successful=False, result_details=str(e))
+            self._handle_failure_exception(e)
         finally:
             # Close the async client while the event loop is still alive to avoid
             # "Event loop is closed" errors when httpx is finalized during GC.

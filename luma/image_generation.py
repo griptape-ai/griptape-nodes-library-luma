@@ -9,7 +9,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
+from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
@@ -25,7 +25,7 @@ SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
-class LumaImageGeneration(ControlNode):
+class LumaImageGeneration(SuccessFailureNode):
     """Generate images with Luma Labs using text prompts and optional style/content reference images."""
 
     MAX_IMAGE_REFS = 9
@@ -158,6 +158,7 @@ class LumaImageGeneration(ControlNode):
             default_filename="luma_image.jpg",
         )
         self._output_file.add_parameter()
+        self._create_status_parameters()
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
         if parameter.name == "reference_type":
@@ -213,6 +214,7 @@ class LumaImageGeneration(ControlNode):
 
     def process(self) -> AsyncResult[None]:
         """Non-blocking entry point for Griptape engine."""
+        self._clear_execution_status()
         yield lambda: self._process_sync()
 
     def _process_sync(self) -> None:
@@ -310,11 +312,12 @@ class LumaImageGeneration(ControlNode):
                 "status",
                 f"✅ Generation completed successfully!\nOriginal URL: {image_url}\n",
             )
+            self._set_status_results(was_successful=True, result_details="Generation completed successfully.")
 
         except Exception as e:
-            error_msg = f"❌ Generation failed: {str(e)}\n"
-            self.append_value_to_parameter("status", error_msg)
-            raise
+            self.append_value_to_parameter("status", f"❌ Generation failed: {str(e)}\n")
+            self._set_status_results(was_successful=False, result_details=str(e))
+            self._handle_failure_exception(e)
         finally:
             # Close the async client while the event loop is still alive to avoid
             # "Event loop is closed" errors when httpx is finalized during GC.

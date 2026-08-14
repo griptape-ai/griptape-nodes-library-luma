@@ -8,7 +8,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
+from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
@@ -23,7 +23,7 @@ API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 MAX_PROMPT_LEN = 500
 
 
-class LumaImageLayer(ControlNode):
+class LumaImageLayer(SuccessFailureNode):
     """Decompose a source image into 1–10 semantic RGBA PNG layers using the Luma Labs layering API."""
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None) -> None:
@@ -103,6 +103,7 @@ class LumaImageLayer(ControlNode):
             default_filename="luma_layer.png",
         )
         self._output_file.add_parameter()
+        self._create_status_parameters()
 
     def _get_api_key(self) -> str:
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
@@ -140,6 +141,7 @@ class LumaImageLayer(ControlNode):
         return self.validate_before_node_run()
 
     def process(self) -> AsyncResult[None]:
+        self._clear_execution_status()
         yield lambda: self._process_sync()
 
     def _process_sync(self) -> None:
@@ -242,10 +244,15 @@ class LumaImageLayer(ControlNode):
                 "status",
                 f"✅ Layering completed! {len(sorted_outputs)} layer(s) produced.\n",
             )
+            self._set_status_results(
+                was_successful=True,
+                result_details=f"Layering completed. {len(sorted_outputs)} layer(s) produced.",
+            )
 
         except Exception as e:
             self.append_value_to_parameter("status", f"❌ Layering failed: {str(e)}\n")
-            raise
+            self._set_status_results(was_successful=False, result_details=str(e))
+            self._handle_failure_exception(e)
         finally:
             # Close the async client while the event loop is still alive to avoid
             # "Event loop is closed" errors when httpx is finalized during GC.

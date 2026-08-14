@@ -9,7 +9,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import AsyncResult, ControlNode
+from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
@@ -24,7 +24,7 @@ SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
 
 
-class LumaImageEdit(ControlNode):
+class LumaImageEdit(SuccessFailureNode):
     """Edit a source image with Luma Labs AI using a prompt and optional additional reference images."""
 
     MAX_IMAGE_REFS = 8
@@ -125,6 +125,7 @@ class LumaImageEdit(ControlNode):
             default_filename="luma_image_edit.jpg",
         )
         self._output_file.add_parameter()
+        self._create_status_parameters()
 
     def _build_image_ref_params(self) -> list[dict]:
         """Build image_ref array for the Luma API, uploading local images as needed."""
@@ -167,6 +168,7 @@ class LumaImageEdit(ControlNode):
         return self.validate_before_node_run()
 
     def process(self) -> AsyncResult[None]:
+        self._clear_execution_status()
         yield lambda: self._process_sync()
 
     def _process_sync(self) -> None:
@@ -262,10 +264,12 @@ class LumaImageEdit(ControlNode):
                 "status",
                 f"✅ Edit completed successfully!\nOriginal URL: {image_url}\n",
             )
+            self._set_status_results(was_successful=True, result_details="Edit completed successfully.")
 
         except Exception as e:
             self.append_value_to_parameter("status", f"❌ Edit failed: {str(e)}\n")
-            raise
+            self._set_status_results(was_successful=False, result_details=str(e))
+            self._handle_failure_exception(e)
         finally:
             # Close the async client while the event loop is still alive to avoid
             # "Event loop is closed" errors when httpx is finalized during GC.
