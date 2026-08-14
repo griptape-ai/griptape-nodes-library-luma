@@ -8,7 +8,7 @@ from griptape_nodes.exe_types.core_types import (
     ParameterMode,
     ParameterTypeBuiltin,
 )
-from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
+from griptape_nodes.exe_types.node_types import SuccessFailureNode
 from griptape_nodes.exe_types.param_components.artifact_url.public_artifact_url_parameter import (
     PublicArtifactUrlParameter,
 )
@@ -140,20 +140,9 @@ class LumaImageLayer(SuccessFailureNode):
     def validate_before_workflow_run(self) -> list[Exception] | None:
         return self.validate_before_node_run()
 
-    def process(self) -> AsyncResult[None]:
-        self._clear_execution_status()
-        yield lambda: self._process_sync()
-
-    def _process_sync(self) -> None:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self._process_async())
-        finally:
-            loop.close()
-
-    async def _process_async(self) -> None:
+    async def aprocess(self) -> None:
         """Decompose image into semantic layers using Luma async API."""
+        self._clear_execution_status()
         client = None
         try:
             api_key = self._get_api_key()
@@ -254,8 +243,6 @@ class LumaImageLayer(SuccessFailureNode):
             self._set_status_results(was_successful=False, result_details=str(e))
             self._handle_failure_exception(e)
         finally:
-            # Close the async client while the event loop is still alive to avoid
-            # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
             # Cleanup uploaded artifacts
