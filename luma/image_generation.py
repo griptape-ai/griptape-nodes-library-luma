@@ -252,6 +252,7 @@ class LumaImageGeneration(ControlNode):
             reference_type = self.get_parameter_value("reference_type")
 
             if reference_type == "image_reference":
+                # Reference image guides a fresh generation
                 image_refs = self._build_image_ref_params()
                 if image_refs:
                     params["image_ref"] = image_refs
@@ -319,6 +320,7 @@ class LumaImageGeneration(ControlNode):
             # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
+            # Cleanup uploaded artifacts
             self._cleanup_image_ref_uploads()
 
     def _download_image(self, image_url: str) -> bytes:

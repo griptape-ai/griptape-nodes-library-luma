@@ -161,18 +161,21 @@ class LumaImageLayer(ControlNode):
             resolution = self.get_parameter_value("resolution") or "1k"
 
             self.append_value_to_parameter("status", "Uploading source image...\n")
+            # Convert serialized dict back to artifact if needed
             source_image_val = self.get_parameter_value("source_image")
             if isinstance(source_image_val, dict) and source_image_val.get("value"):
                 source_image_val = ImageUrlArtifact(
                     value=source_image_val["value"], name=source_image_val.get("name", "source_image")
                 )
                 self.set_parameter_value("source_image", source_image_val)
+            # Let PublicArtifactUrlParameter handle getting and converting the artifact
             source_url = self._public_source_parameter.get_public_url_for_parameter()
             if not source_url:
                 raise ValueError("Source image is required and could not be resolved to a URL.")
 
             self.append_value_to_parameter("status", "Creating layering request...\n")
 
+            # Build request parameters for the layering generation type
             params: dict[str, Any] = {
                 "type": "layering",
                 "model": "uni-1",
@@ -180,6 +183,7 @@ class LumaImageLayer(ControlNode):
                 "layering": {"resolution": resolution},
             }
 
+            # Add optional prompt
             if prompt.strip():
                 params["prompt"] = prompt.strip()
 
@@ -189,6 +193,7 @@ class LumaImageLayer(ControlNode):
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for layering to complete...\n")
 
+            # Poll for completion
             completed = False
             max_attempts = 120
             attempt = 0
@@ -209,6 +214,7 @@ class LumaImageLayer(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
+            # Sort layers by index and download each to the project file store
             outputs = generation.output or []
             sorted_outputs = sorted(outputs, key=lambda o: o.layer.index if o.layer else 0)
 
@@ -241,6 +247,9 @@ class LumaImageLayer(ControlNode):
             self.append_value_to_parameter("status", f"❌ Layering failed: {str(e)}\n")
             raise
         finally:
+            # Close the async client while the event loop is still alive to avoid
+            # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
+            # Cleanup uploaded artifacts
             self._public_source_parameter.delete_uploaded_artifact()

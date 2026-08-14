@@ -128,6 +128,7 @@ class LumaVideoGeneration(ControlNode):
         )
         self._public_start_frame_parameter.add_input_parameters()
 
+        # End frame with public URL support
         self._public_end_frame_parameter = PublicArtifactUrlParameter(
             node=self,
             artifact_url_parameter=Parameter(
@@ -329,6 +330,7 @@ class LumaVideoGeneration(ControlNode):
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
 
+            # Build request parameters for the video generation type
             params: dict = {
                 "type": "video",
                 "prompt": prompt.strip(),
@@ -340,6 +342,7 @@ class LumaVideoGeneration(ControlNode):
 
             hdr = self.get_parameter_value("hdr")
 
+            # Video-specific output settings live under the `video` options object
             video_options: dict = {
                 "resolution": resolution,
                 "duration": duration,
@@ -351,10 +354,13 @@ class LumaVideoGeneration(ControlNode):
 
             if mode == "start_end_frame":
                 loop_video = self.get_parameter_value("loop")
+                # Add loop if enabled
                 if loop_video:
                     video_options["loop"] = True
                     self.append_value_to_parameter("status", "Loop mode enabled\n")
 
+                # Add optional start and end frames
+                # Convert serialized dict back to artifact if needed
                 start_frame = self.get_parameter_value("start_frame")
                 if start_frame:
                     if isinstance(start_frame, dict) and start_frame.get("value"):
@@ -362,16 +368,19 @@ class LumaVideoGeneration(ControlNode):
                             value=start_frame["value"], name=start_frame.get("name", "start_frame")
                         )
                         self.set_parameter_value("start_frame", start_frame)
+                    # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
                     if start_frame_url:
                         video_options["start_frame"] = {"url": start_frame_url}
                         self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
 
+                # Convert serialized dict back to artifact if needed
                 end_frame = self.get_parameter_value("end_frame")
                 if end_frame:
                     if isinstance(end_frame, dict) and end_frame.get("value"):
                         end_frame = ImageUrlArtifact(value=end_frame["value"], name=end_frame.get("name", "end_frame"))
                         self.set_parameter_value("end_frame", end_frame)
+                    # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
                     if end_frame_url:
                         video_options["end_frame"] = {"url": end_frame_url}
@@ -392,12 +401,14 @@ class LumaVideoGeneration(ControlNode):
 
             params["video"] = video_options
 
+            # Create generation
             generation = await client.generations.create(**params)
             generation_id = generation.id
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
+            # Poll for completion
             completed = False
             max_attempts = 200
             attempt = 0
@@ -419,11 +430,13 @@ class LumaVideoGeneration(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
+            # Download and save video from the generation output list
             video_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading generated video...\n")
             video_bytes = self._download_video(video_url)
 
+            # Save to project files
             dest = self._output_file.build_file()
             saved = dest.write_bytes(video_bytes)
 
@@ -445,6 +458,7 @@ class LumaVideoGeneration(ControlNode):
             # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
+            # Cleanup uploaded artifacts
             self._public_start_frame_parameter.delete_uploaded_artifact()
             self._public_end_frame_parameter.delete_uploaded_artifact()
             self._cleanup_keyframe_uploads()

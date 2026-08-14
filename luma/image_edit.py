@@ -188,18 +188,21 @@ class LumaImageEdit(ControlNode):
             model = self.get_parameter_value("model")
 
             self.append_value_to_parameter("status", "Uploading source image...\n")
+            # Convert serialized dict back to artifact if needed
             source_image_val = self.get_parameter_value("source_image")
             if isinstance(source_image_val, dict) and source_image_val.get("value"):
                 source_image_val = ImageUrlArtifact(
                     value=source_image_val["value"], name=source_image_val.get("name", "source_image")
                 )
                 self.set_parameter_value("source_image", source_image_val)
+            # Let PublicArtifactUrlParameter handle getting and converting the artifact
             source_url = self._public_source_parameter.get_public_url_for_parameter()
             if not source_url:
                 raise ValueError("Source image is required and could not be resolved to a URL.")
 
             self.append_value_to_parameter("status", "Creating edit request...\n")
 
+            # Build request parameters for the image_edit generation type
             params: dict[str, Any] = {
                 "type": "image_edit",
                 "model": model,
@@ -209,6 +212,7 @@ class LumaImageEdit(ControlNode):
             if prompt.strip():
                 params["prompt"] = prompt.strip()
 
+            # Add optional reference images
             image_refs = self._build_image_ref_params()
             if image_refs:
                 params["image_ref"] = image_refs
@@ -220,6 +224,7 @@ class LumaImageEdit(ControlNode):
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
 
+            # Poll for completion
             completed = False
             max_attempts = 120
             attempt = 0
@@ -240,11 +245,13 @@ class LumaImageEdit(ControlNode):
             if not completed:
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
+            # Get image URL from the generation output list
             image_url = generation.output[0].url
 
             self.append_value_to_parameter("status", "Downloading edited image...\n")
             image_bytes = File(image_url).read_bytes()
 
+            # Save to project files
             dest = self._output_file.build_file()
             saved = dest.write_bytes(image_bytes)
 
@@ -260,7 +267,10 @@ class LumaImageEdit(ControlNode):
             self.append_value_to_parameter("status", f"❌ Edit failed: {str(e)}\n")
             raise
         finally:
+            # Close the async client while the event loop is still alive to avoid
+            # "Event loop is closed" errors when httpx is finalized during GC.
             if client is not None:
                 await client.close()
+            # Cleanup uploaded artifacts
             self._public_source_parameter.delete_uploaded_artifact()
             self._cleanup_image_ref_uploads()
