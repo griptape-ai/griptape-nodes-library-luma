@@ -30,6 +30,7 @@ Generate images from text prompts with support for:
 - Up to 9 reference images to guide style and content via `image_reference` mode
 - Multiple aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 21:9)
 - Two model options: `uni-1` (default) and `uni-1-max` (higher quality)
+- Output format: `jpeg` (default, smaller file size) or `png` (lossless)
 
 ### Image Edit Node
 
@@ -39,6 +40,7 @@ Edit a source image using Luma AI with support for:
 - Optional text prompt to describe the desired edit
 - Up to 8 additional reference images to guide the edit
 - Two model options: `uni-1` (default) and `uni-1-max` (higher quality)
+- Output format: `jpeg` (default, smaller file size) or `png` (lossless)
 
 ### Image Layer Node
 
@@ -50,6 +52,7 @@ Decompose a source image into semantic RGBA PNG layers with support for:
 - Returns 1–10 RGBA PNG layers, each exposed as an individual output
 - Layer metadata (label, description) logged to status output
 - Uses the `uni-1` model (the only model supporting the layering API)
+- Output is always PNG — RGBA transparency requires lossless format
 
 > **Note:** The layering API requires the `image_layering` capability grant on your Luma account.
 
