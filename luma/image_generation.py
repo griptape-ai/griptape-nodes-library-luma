@@ -62,6 +62,18 @@ class LumaImageGeneration(SuccessFailureNode):
 
         self.add_parameter(
             Parameter(
+                name="output_format",
+                tooltip="Output image format. jpeg produces smaller files; png supports lossless quality.",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="jpeg",
+                traits={Options(choices=["jpeg", "png"])},
+                ui_options={"display_name": "Output Format"},
+            )
+        )
+
+        self.add_parameter(
+            Parameter(
                 name="aspect_ratio",
                 tooltip="Desired aspect ratio for the generated image",
                 type=ParameterTypeBuiltin.STR.value,
@@ -161,8 +173,18 @@ class LumaImageGeneration(SuccessFailureNode):
         self._create_status_parameters()
 
     def after_value_set(self, parameter: Parameter, value: Any) -> None:
-        if parameter.name == "reference_type":
+        if parameter.name == "output_format":
+            self._update_output_file_extension(value)
+        elif parameter.name == "reference_type":
             self._apply_reference_type(value)
+
+    def _update_output_file_extension(self, output_format: str) -> None:
+        ext = ".png" if output_format == "png" else ".jpg"
+        current = self.get_parameter_value("output_file") or self._output_file._default_filename
+        if isinstance(current, str):
+            new_name = Path(current).with_suffix(ext).name
+            self._output_file._default_filename = new_name
+            self.set_parameter_value("output_file", new_name)
 
     def _apply_reference_type(self, mode: str) -> None:
         if mode == "image_reference":
@@ -238,6 +260,7 @@ class LumaImageGeneration(SuccessFailureNode):
                 raise ValueError("Prompt is required and cannot be empty")
 
             model = self.get_parameter_value("model")
+            output_format = self.get_parameter_value("output_format") or "jpeg"
             aspect_ratio = self.get_parameter_value("aspect_ratio")
 
             self.append_value_to_parameter("status", "Creating generation request...\n")
@@ -248,6 +271,7 @@ class LumaImageGeneration(SuccessFailureNode):
                 "prompt": prompt.strip(),
                 "model": model,
                 "aspect_ratio": aspect_ratio,
+                "output_format": output_format,
             }
 
             # Add reference image based on selected type
@@ -301,7 +325,9 @@ class LumaImageGeneration(SuccessFailureNode):
             self.append_value_to_parameter("status", "Downloading generated image...\n")
             image_bytes = self._download_image(image_url)
 
-            # Save to project files
+            # Save to project files — use extension matching the requested format
+            ext = ".png" if output_format == "png" else ".jpg"
+            self._output_file._default_filename = f"luma_image{ext}"
             dest = self._output_file.build_file()
             saved = dest.write_bytes(image_bytes)
 

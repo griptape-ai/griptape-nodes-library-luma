@@ -59,6 +59,18 @@ class LumaImageEdit(SuccessFailureNode):
             )
         )
 
+        self.add_parameter(
+            Parameter(
+                name="output_format",
+                tooltip="Output image format. jpeg produces smaller files; png supports lossless quality.",
+                type=ParameterTypeBuiltin.STR.value,
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                default_value="jpeg",
+                traits={Options(choices=["jpeg", "png"])},
+                ui_options={"display_name": "Output Format"},
+            )
+        )
+
         # Source image — required. Aspect ratio is derived from the source image by the API.
         self._public_source_parameter = PublicArtifactUrlParameter(
             node=self,
@@ -127,6 +139,18 @@ class LumaImageEdit(SuccessFailureNode):
         self._output_file.add_parameter()
         self._create_status_parameters()
 
+    def after_value_set(self, parameter: Parameter, value: Any) -> None:
+        if parameter.name == "output_format":
+            self._update_output_file_extension(value)
+
+    def _update_output_file_extension(self, output_format: str) -> None:
+        ext = ".png" if output_format == "png" else ".jpg"
+        current = self.get_parameter_value("output_file") or self._output_file._default_filename
+        if isinstance(current, str):
+            new_name = Path(current).with_suffix(ext).name
+            self._output_file._default_filename = new_name
+            self.set_parameter_value("output_file", new_name)
+
     def _build_image_ref_params(self) -> list[dict]:
         """Build image_ref array for the Luma API, uploading local images as needed."""
         param_names = [p.name for p in self._image_refs_list.get_child_parameters()]
@@ -188,6 +212,7 @@ class LumaImageEdit(SuccessFailureNode):
 
             prompt = self.get_parameter_value("prompt") or ""
             model = self.get_parameter_value("model")
+            output_format = self.get_parameter_value("output_format") or "jpeg"
 
             self.append_value_to_parameter("status", "Uploading source image...\n")
             # Convert serialized dict back to artifact if needed
@@ -209,6 +234,7 @@ class LumaImageEdit(SuccessFailureNode):
                 "type": "image_edit",
                 "model": model,
                 "source": {"url": source_url},
+                "output_format": output_format,
             }
 
             if prompt.strip():
@@ -253,7 +279,9 @@ class LumaImageEdit(SuccessFailureNode):
             self.append_value_to_parameter("status", "Downloading edited image...\n")
             image_bytes = File(image_url).read_bytes()
 
-            # Save to project files
+            # Save to project files — use extension matching the requested format
+            ext = ".png" if output_format == "png" else ".jpg"
+            self._output_file._default_filename = f"luma_image_edit{ext}"
             dest = self._output_file.build_file()
             saved = dest.write_bytes(image_bytes)
 
