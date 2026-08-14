@@ -145,24 +145,28 @@ class LumaImageLayer(SuccessFailureNode):
         self._clear_execution_status()
         client = None
         try:
-            api_key = self._get_api_key()
-            client = AsyncLuma(auth_token=api_key)
+            try:
+                api_key = self._get_api_key()
+                client = AsyncLuma(auth_token=api_key)
+            except Exception as e:
+                raise RuntimeError(f"Setup failed: {e}") from e
 
             prompt = self.get_parameter_value("prompt") or ""
             resolution = self.get_parameter_value("resolution") or "1k"
 
             self.append_value_to_parameter("status", "Uploading source image...\n")
-            # Convert serialized dict back to artifact if needed
-            source_image_val = self.get_parameter_value("source_image")
-            if isinstance(source_image_val, dict) and source_image_val.get("value"):
-                source_image_val = ImageUrlArtifact(
-                    value=source_image_val["value"], name=source_image_val.get("name", "source_image")
-                )
-                self.set_parameter_value("source_image", source_image_val)
-            # Let PublicArtifactUrlParameter handle getting and converting the artifact
-            source_url = self._public_source_parameter.get_public_url_for_parameter()
-            if not source_url:
-                raise ValueError("Source image is required and could not be resolved to a URL.")
+            try:
+                source_image_val = self.get_parameter_value("source_image")
+                if isinstance(source_image_val, dict) and source_image_val.get("value"):
+                    source_image_val = ImageUrlArtifact(
+                        value=source_image_val["value"], name=source_image_val.get("name", "source_image")
+                    )
+                    self.set_parameter_value("source_image", source_image_val)
+                source_url = self._public_source_parameter.get_public_url_for_parameter()
+                if not source_url:
+                    raise ValueError("Source image is required and could not be resolved to a URL.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to prepare source image: {e}") from e
 
             self.append_value_to_parameter("status", "Creating layering request...\n")
 
@@ -178,8 +182,11 @@ class LumaImageLayer(SuccessFailureNode):
             if prompt.strip():
                 params["prompt"] = prompt.strip()
 
-            generation = await client.generations.create(**params)
-            generation_id = generation.id
+            try:
+                generation = await client.generations.create(**params)
+                generation_id = generation.id
+            except Exception as e:
+                raise RuntimeError(f"API request failed: {e}") from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for layering to complete...\n")
@@ -192,7 +199,11 @@ class LumaImageLayer(SuccessFailureNode):
             while not completed and attempt < max_attempts:
                 await asyncio.sleep(2)
                 attempt += 1
-                generation = await client.generations.get(generation_id=generation_id)
+
+                try:
+                    generation = await client.generations.get(generation_id=generation_id)
+                except Exception as e:
+                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
 
                 if generation.state == "completed":
                     completed = True
@@ -206,28 +217,28 @@ class LumaImageLayer(SuccessFailureNode):
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
             # Sort layers by index and download each to the project file store
-            outputs = generation.output or []
-            sorted_outputs = sorted(outputs, key=lambda o: o.layer.index if o.layer else 0)
-
-            self.append_value_to_parameter("status", f"Downloading {len(sorted_outputs)} layer(s)...\n")
-            self._layers_list.clear_list()
-
-            for i, output in enumerate(sorted_outputs):
-                layer_bytes = File(output.url).read_bytes()
-                dest = self._output_file.build_file(_index=i + 1)
-                saved = dest.write_bytes(layer_bytes)
-
-                layer_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
-                child = self._layers_list.add_child_parameter()
-                self.set_parameter_value(child.name, layer_artifact)
-
-                if output.layer:
-                    self.append_value_to_parameter(
-                        "status",
-                        f"Layer {output.layer.index}: {output.layer.label} — {output.layer.description}\n",
-                    )
-                else:
-                    self.append_value_to_parameter("status", f"Layer {i + 1}: saved\n")
+            sorted_outputs: list = []
+            try:
+                outputs = generation.output or []
+                sorted_outputs = sorted(outputs, key=lambda o: o.layer.index if o.layer else 0)
+                self.append_value_to_parameter("status", f"Downloading {len(sorted_outputs)} layer(s)...\n")
+                self._layers_list.clear_list()
+                for i, output in enumerate(sorted_outputs):
+                    layer_bytes = File(output.url).read_bytes()
+                    dest = self._output_file.build_file(_index=i + 1)
+                    saved = dest.write_bytes(layer_bytes)
+                    layer_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
+                    child = self._layers_list.add_child_parameter()
+                    self.set_parameter_value(child.name, layer_artifact)
+                    if output.layer:
+                        self.append_value_to_parameter(
+                            "status",
+                            f"Layer {output.layer.index}: {output.layer.label} — {output.layer.description}\n",
+                        )
+                    else:
+                        self.append_value_to_parameter("status", f"Layer {i + 1}: saved\n")
+            except Exception as e:
+                raise RuntimeError(f"Failed to save output layers: {e}") from e
 
             self.append_value_to_parameter(
                 "status",

@@ -196,25 +196,29 @@ class LumaImageEdit(SuccessFailureNode):
         self._clear_execution_status()
         client = None
         try:
-            api_key = self._get_api_key()
-            client = AsyncLuma(auth_token=api_key)
+            try:
+                api_key = self._get_api_key()
+                client = AsyncLuma(auth_token=api_key)
+            except Exception as e:
+                raise RuntimeError(f"Setup failed: {e}") from e
 
             prompt = self.get_parameter_value("prompt") or ""
             model = self.get_parameter_value("model")
             output_format = self.get_parameter_value("output_format") or "jpeg"
 
             self.append_value_to_parameter("status", "Uploading source image...\n")
-            # Convert serialized dict back to artifact if needed
-            source_image_val = self.get_parameter_value("source_image")
-            if isinstance(source_image_val, dict) and source_image_val.get("value"):
-                source_image_val = ImageUrlArtifact(
-                    value=source_image_val["value"], name=source_image_val.get("name", "source_image")
-                )
-                self.set_parameter_value("source_image", source_image_val)
-            # Let PublicArtifactUrlParameter handle getting and converting the artifact
-            source_url = self._public_source_parameter.get_public_url_for_parameter()
-            if not source_url:
-                raise ValueError("Source image is required and could not be resolved to a URL.")
+            try:
+                source_image_val = self.get_parameter_value("source_image")
+                if isinstance(source_image_val, dict) and source_image_val.get("value"):
+                    source_image_val = ImageUrlArtifact(
+                        value=source_image_val["value"], name=source_image_val.get("name", "source_image")
+                    )
+                    self.set_parameter_value("source_image", source_image_val)
+                source_url = self._public_source_parameter.get_public_url_for_parameter()
+                if not source_url:
+                    raise ValueError("Source image is required and could not be resolved to a URL.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to prepare source image: {e}") from e
 
             self.append_value_to_parameter("status", "Creating edit request...\n")
 
@@ -230,13 +234,19 @@ class LumaImageEdit(SuccessFailureNode):
                 params["prompt"] = prompt.strip()
 
             # Add optional reference images
-            image_refs = self._build_image_ref_params()
+            try:
+                image_refs = self._build_image_ref_params()
+            except Exception as e:
+                raise RuntimeError(f"Failed to prepare reference images: {e}") from e
             if image_refs:
                 params["image_ref"] = image_refs
                 self.append_value_to_parameter("status", f"Using {len(image_refs)} additional reference image(s)\n")
 
-            generation = await client.generations.create(**params)
-            generation_id = generation.id
+            try:
+                generation = await client.generations.create(**params)
+                generation_id = generation.id
+            except Exception as e:
+                raise RuntimeError(f"API request failed: {e}") from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
@@ -249,7 +259,11 @@ class LumaImageEdit(SuccessFailureNode):
             while not completed and attempt < max_attempts:
                 await asyncio.sleep(2)
                 attempt += 1
-                generation = await client.generations.get(generation_id=generation_id)
+
+                try:
+                    generation = await client.generations.get(generation_id=generation_id)
+                except Exception as e:
+                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
 
                 if generation.state == "completed":
                     completed = True
@@ -263,19 +277,20 @@ class LumaImageEdit(SuccessFailureNode):
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
             # Get image URL from the generation output list
-            image_url = generation.output[0].url
-
-            self.append_value_to_parameter("status", "Downloading edited image...\n")
-            image_bytes = File(image_url).read_bytes()
-
-            # Save to project files — use extension matching the requested format
-            ext = ".png" if output_format == "png" else ".jpg"
-            self._output_file._default_filename = f"luma_image_edit{ext}"
-            dest = self._output_file.build_file()
-            saved = dest.write_bytes(image_bytes)
-
-            image_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
-            self.set_parameter_value("image", image_artifact)
+            image_url = ""
+            try:
+                image_url = generation.output[0].url
+                self.append_value_to_parameter("status", "Downloading edited image...\n")
+                image_bytes = File(image_url).read_bytes()
+                # Save to project files — use extension matching the requested format
+                ext = ".png" if output_format == "png" else ".jpg"
+                self._output_file._default_filename = f"luma_image_edit{ext}"
+                dest = self._output_file.build_file()
+                saved = dest.write_bytes(image_bytes)
+                image_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
+                self.set_parameter_value("image", image_artifact)
+            except Exception as e:
+                raise RuntimeError(f"Failed to save output: {e}") from e
 
             self.append_value_to_parameter(
                 "status",

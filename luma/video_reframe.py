@@ -193,8 +193,11 @@ class LumaVideoReframe(SuccessFailureNode):
         self._clear_execution_status()
         client = None
         try:
-            api_key = self._get_api_key()
-            client = AsyncLuma(auth_token=api_key)
+            try:
+                api_key = self._get_api_key()
+                client = AsyncLuma(auth_token=api_key)
+            except Exception as e:
+                raise RuntimeError(f"Setup failed: {e}") from e
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
@@ -205,7 +208,10 @@ class LumaVideoReframe(SuccessFailureNode):
                 self.set_parameter_value("input_video", input_video)
 
             # Let PublicArtifactUrlParameter handle getting and converting the artifact
-            video_url = self._public_input_video_parameter.get_public_url_for_parameter()
+            try:
+                video_url = self._public_input_video_parameter.get_public_url_for_parameter()
+            except Exception as e:
+                raise RuntimeError(f"Failed to prepare input video: {e}") from e
             if not video_url:
                 raise ValueError("Input video is required")
 
@@ -243,8 +249,11 @@ class LumaVideoReframe(SuccessFailureNode):
                 self.append_value_to_parameter("status", f"Using source position: {source_position}\n")
 
             # Create reframe generation
-            generation = await client.generations.create(**params)
-            generation_id = generation.id
+            try:
+                generation = await client.generations.create(**params)
+                generation_id = generation.id
+            except Exception as e:
+                raise RuntimeError(f"API request failed: {e}") from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
@@ -259,7 +268,10 @@ class LumaVideoReframe(SuccessFailureNode):
                 await asyncio.sleep(3)  # Longer wait for videos
                 attempt += 1
 
-                generation = await client.generations.get(generation_id=generation_id)
+                try:
+                    generation = await client.generations.get(generation_id=generation_id)
+                except Exception as e:
+                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
 
                 if generation.state == "completed":
                     completed = True
@@ -273,22 +285,23 @@ class LumaVideoReframe(SuccessFailureNode):
                 raise TimeoutError(f"Reframe timed out after {max_attempts} attempts")
 
             # Get video URL from the generation output list
-            video_url = generation.output[0].url
-
-            self.append_value_to_parameter("status", "Downloading reframed video...\n")
-            video_bytes = self._download_video(video_url)
-
-            # Save to project files
-            dest = self._output_file.build_file()
-            saved = dest.write_bytes(video_bytes)
-
-            video_artifact = VideoUrlArtifact(value=saved.location)
-            self.parameter_output_values["output_video"] = video_artifact
-            self.publish_update_to_parameter("output_video", video_artifact)
+            output_video_url = ""
+            try:
+                output_video_url = generation.output[0].url
+                self.append_value_to_parameter("status", "Downloading reframed video...\n")
+                video_bytes = self._download_video(output_video_url)
+                # Save to project files
+                dest = self._output_file.build_file()
+                saved = dest.write_bytes(video_bytes)
+                video_artifact = VideoUrlArtifact(value=saved.location)
+                self.parameter_output_values["output_video"] = video_artifact
+                self.publish_update_to_parameter("output_video", video_artifact)
+            except Exception as e:
+                raise RuntimeError(f"Failed to save output: {e}") from e
 
             self.append_value_to_parameter(
                 "status",
-                f"✅ Reframe completed successfully!\nOriginal URL: {video_url}\n",
+                f"✅ Reframe completed successfully!\nOriginal URL: {output_video_url}\n",
             )
             self._set_status_results(was_successful=True, result_details="Reframe completed successfully.")
 

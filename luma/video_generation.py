@@ -304,8 +304,11 @@ class LumaVideoGeneration(SuccessFailureNode):
         self._clear_execution_status()
         client = None
         try:
-            api_key = self._get_api_key()
-            client = AsyncLuma(auth_token=api_key)
+            try:
+                api_key = self._get_api_key()
+                client = AsyncLuma(auth_token=api_key)
+            except Exception as e:
+                raise RuntimeError(f"Setup failed: {e}") from e
 
             prompt = self.get_parameter_value("prompt")
             if not prompt:
@@ -358,7 +361,10 @@ class LumaVideoGeneration(SuccessFailureNode):
                         )
                         self.set_parameter_value("start_frame", start_frame)
                     # Let PublicArtifactUrlParameter handle getting and converting the artifact
-                    start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
+                    try:
+                        start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to prepare start frame: {e}") from e
                     if start_frame_url:
                         video_options["start_frame"] = {"url": start_frame_url}
                         self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
@@ -370,13 +376,19 @@ class LumaVideoGeneration(SuccessFailureNode):
                         end_frame = ImageUrlArtifact(value=end_frame["value"], name=end_frame.get("name", "end_frame"))
                         self.set_parameter_value("end_frame", end_frame)
                     # Let PublicArtifactUrlParameter handle getting and converting the artifact
-                    end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
+                    try:
+                        end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
+                    except Exception as e:
+                        raise RuntimeError(f"Failed to prepare end frame: {e}") from e
                     if end_frame_url:
                         video_options["end_frame"] = {"url": end_frame_url}
                         self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
 
             elif mode == "keyframes":
-                keyframes, keyframe_indexes = self._build_keyframe_params()
+                try:
+                    keyframes, keyframe_indexes = self._build_keyframe_params()
+                except Exception as e:
+                    raise RuntimeError(f"Failed to prepare keyframes: {e}") from e
                 if keyframes:
                     video_options["keyframes"] = keyframes
                     video_options["keyframe_indexes"] = keyframe_indexes
@@ -391,8 +403,11 @@ class LumaVideoGeneration(SuccessFailureNode):
             params["video"] = video_options
 
             # Create generation
-            generation = await client.generations.create(**params)
-            generation_id = generation.id
+            try:
+                generation = await client.generations.create(**params)
+                generation_id = generation.id
+            except Exception as e:
+                raise RuntimeError(f"API request failed: {e}") from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
@@ -406,7 +421,10 @@ class LumaVideoGeneration(SuccessFailureNode):
                 await asyncio.sleep(3)
                 attempt += 1
 
-                generation = await client.generations.get(generation_id=generation_id)
+                try:
+                    generation = await client.generations.get(generation_id=generation_id)
+                except Exception as e:
+                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
 
                 if generation.state == "completed":
                     completed = True
@@ -420,18 +438,19 @@ class LumaVideoGeneration(SuccessFailureNode):
                 raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
 
             # Download and save video from the generation output list
-            video_url = generation.output[0].url
-
-            self.append_value_to_parameter("status", "Downloading generated video...\n")
-            video_bytes = self._download_video(video_url)
-
-            # Save to project files
-            dest = self._output_file.build_file()
-            saved = dest.write_bytes(video_bytes)
-
-            video_artifact = VideoUrlArtifact(value=saved.location)
-            self.parameter_output_values["video"] = video_artifact
-            self.publish_update_to_parameter("video", video_artifact)
+            video_url = ""
+            try:
+                video_url = generation.output[0].url
+                self.append_value_to_parameter("status", "Downloading generated video...\n")
+                video_bytes = self._download_video(video_url)
+                # Save to project files
+                dest = self._output_file.build_file()
+                saved = dest.write_bytes(video_bytes)
+                video_artifact = VideoUrlArtifact(value=saved.location)
+                self.parameter_output_values["video"] = video_artifact
+                self.publish_update_to_parameter("video", video_artifact)
+            except Exception as e:
+                raise RuntimeError(f"Failed to save output: {e}") from e
 
             self.append_value_to_parameter(
                 "status",
