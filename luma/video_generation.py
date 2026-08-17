@@ -18,8 +18,8 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
-from utils.connection_utils import disconnect_incoming, disconnect_param_list_incoming
-from utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
+from luma_utils.connection_utils import disconnect_incoming, disconnect_param_list_incoming
+from luma_utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
