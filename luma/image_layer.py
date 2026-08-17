@@ -222,13 +222,15 @@ class LumaImageLayer(SuccessFailureNode):
                 outputs = generation.output or []
                 sorted_outputs = sorted(outputs, key=lambda o: o.layer.index if o.layer else 0)
                 self.append_value_to_parameter("status", f"Downloading {len(sorted_outputs)} layer(s)...\n")
-                self._layers_list.clear_list()
-                for i, output in enumerate(sorted_outputs):
+                for child in self._layers_list.get_child_parameters():
+                    self.set_parameter_value(child.name, None)
+                self._layers_list.ensure_length(len(sorted_outputs), display_name_prefix="Layer")
+                children = self._layers_list.get_child_parameters()
+                for i, (output, child) in enumerate(zip(sorted_outputs, children, strict=True)):
                     layer_bytes = File(output.url).read_bytes()
                     dest = self._output_file.build_file(_index=i + 1)
                     saved = dest.write_bytes(layer_bytes)
                     layer_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)
-                    child = self._layers_list.add_child_parameter()
                     self.set_parameter_value(child.name, layer_artifact)
                     if output.layer:
                         self.append_value_to_parameter(

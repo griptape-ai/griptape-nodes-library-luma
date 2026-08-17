@@ -140,7 +140,13 @@ class LumaImageGeneration(SuccessFailureNode):
                 type="ImageUrlArtifact",
                 allowed_modes=set(),
             ),
-            disclaimer_message="",
+            disclaimer_message="The Luma API service utilizes this URL to access the reference images for generation.",
+        )
+        self._image_refs_list.set_badge(
+            variant="cloud-upload",
+            title="Media Upload",
+            message=self._public_reference_image_parameter.get_help_message(),
+            hide_clear_button=False,
         )
 
         self.add_parameter(

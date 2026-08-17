@@ -159,6 +159,12 @@ class LumaVideoGeneration(SuccessFailureNode):
             hide=True,
         )
         self.add_parameter(self._keyframe_images_list)
+        self._keyframe_images_list.set_badge(
+            variant="cloud-upload",
+            title="Media Upload",
+            message=self._public_start_frame_parameter.get_help_message(),
+            hide_clear_button=False,
+        )
 
         self._keyframe_indexes_list = ParameterList(
             name="keyframe_indexes",

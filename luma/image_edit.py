@@ -109,6 +109,12 @@ class LumaImageEdit(SuccessFailureNode):
             display_name="Additional References",
         )
         self.add_parameter(self._image_refs_list)
+        self._image_refs_list.set_badge(
+            variant="cloud-upload",
+            title="Media Upload",
+            message=self._public_source_parameter.get_help_message(),
+            hide_clear_button=False,
+        )
 
         self.add_parameter(
             Parameter(
