@@ -128,6 +128,10 @@ class LumaImageGeneration(SuccessFailureNode):
             max_items=self.MAX_IMAGE_REFS,
             display_name="Reference Images",
             hide=True,
+            ui_options={
+                "clickable_file_browser": True,
+                "file_browser_options": {"extensions": [".png", ".jpg"]},
+            },
         )
         self.add_parameter(self._image_refs_list)
 
@@ -188,7 +192,10 @@ class LumaImageGeneration(SuccessFailureNode):
         ext = ".png" if output_format == "png" else ".jpg"
         current = self.get_parameter_value("output_file") or self._output_file._default_filename
         if isinstance(current, str):
-            new_name = Path(current).with_suffix(ext).name
+            p = Path(current)
+            # Strip only known image extensions to avoid eating dotted stems (e.g. "render.v2")
+            stem = p.with_suffix("").name if p.suffix.lower() in {".jpg", ".png"} else p.name
+            new_name = stem + ext
             self._output_file._default_filename = new_name
             self.set_parameter_value("output_file", new_name)
 
@@ -330,9 +337,7 @@ class LumaImageGeneration(SuccessFailureNode):
                 image_url = generation.output[0].url
                 self.append_value_to_parameter("status", "Downloading generated image...\n")
                 image_bytes = self._download_image(image_url)
-                # Save to project files — use extension matching the requested format
-                ext = ".png" if output_format == "png" else ".jpg"
-                self._output_file._default_filename = f"luma_image{ext}"
+                # Save to project files — extension already synced by _update_output_file_extension
                 dest = self._output_file.build_file()
                 saved = dest.write_bytes(image_bytes)
                 image_artifact = ImageUrlArtifact(value=saved.location, name=saved.name)

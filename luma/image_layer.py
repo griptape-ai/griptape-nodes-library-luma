@@ -55,7 +55,7 @@ class LumaImageLayer(SuccessFailureNode):
                     "clickable_file_browser": True,
                     "expander": True,
                     "file_browser_options": {
-                        "extensions": [".png", ".jpg", ".jpeg"],
+                        "extensions": [".png", ".jpg"],
                         "allow_multiple": False,
                     },
                     "display_name": "Source Image",
@@ -84,6 +84,7 @@ class LumaImageLayer(SuccessFailureNode):
             output_type="ImageUrlArtifact",
             allowed_modes={ParameterMode.OUTPUT},
             display_name="Output Layers",
+            max_items=10,
         )
         self.add_parameter(self._layers_list)
 

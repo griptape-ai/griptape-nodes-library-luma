@@ -299,6 +299,33 @@ class LumaVideoGeneration(SuccessFailureNode):
                         "must have the same number of items."
                     )
                 )
+            else:
+                index_children = self._keyframe_indexes_list.get_child_parameters()
+                index_values = [
+                    int(v) if (v := self.get_parameter_value(p.name)) is not None else 0 for p in index_children
+                ]
+
+                # Uniqueness check
+                if len(index_values) != len(set(index_values)):
+                    seen: set[int] = set()
+                    dupes: set[int] = set()
+                    for v in index_values:
+                        (dupes if v in seen else seen).add(v)
+                    errors.append(
+                        ValueError(f"{self.name}: Keyframe indexes must be unique. Duplicates: {sorted(dupes)}.")
+                    )
+
+                # Range check (24 fps: 5 s → 0–120, 10 s → 0–240)
+                duration = self.get_parameter_value("duration") or "5s"
+                max_index = 120 if duration == "5s" else 240
+                out_of_range = [v for v in index_values if not (0 <= v <= max_index)]
+                if out_of_range:
+                    errors.append(
+                        ValueError(
+                            f"{self.name}: Keyframe index values must be 0–{max_index} for a {duration} video. "
+                            f"Out of range: {sorted(out_of_range)}."
+                        )
+                    )
 
         return errors if errors else None
 
@@ -484,7 +511,7 @@ class LumaVideoGeneration(SuccessFailureNode):
 
         valid_image_names: list[str] = []
         valid_indexes: list[int] = []
-        for img_param, idx_param in zip(image_children, index_children, strict=False):
+        for img_param, idx_param in zip(image_children, index_children, strict=True):
             if self.get_parameter_value(img_param.name) is not None:
                 valid_image_names.append(img_param.name)
                 idx_value = self.get_parameter_value(idx_param.name)

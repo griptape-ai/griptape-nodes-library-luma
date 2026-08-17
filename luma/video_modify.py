@@ -114,7 +114,7 @@ class LumaVideoModify(SuccessFailureNode):
                     "clickable_file_browser": True,
                     "expander": True,
                     "file_browser_options": {
-                        "extensions": [".png", ".jpg", ".jpeg"],
+                        "extensions": [".png", ".jpg"],
                         "allow_multiple": False,
                     },
                 },

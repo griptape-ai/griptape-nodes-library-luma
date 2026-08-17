@@ -84,7 +84,7 @@ class LumaImageEdit(SuccessFailureNode):
                     "clickable_file_browser": True,
                     "expander": True,
                     "file_browser_options": {
-                        "extensions": [".png", ".jpg", ".jpeg"],
+                        "extensions": [".png", ".jpg"],
                         "allow_multiple": False,
                     },
                     "display_name": "Source Image",
