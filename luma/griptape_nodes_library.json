@@ -15,8 +15,8 @@
     "metadata": {
         "author": "Griptape",
         "description": "Griptape Nodes for the Luma Agents API - Image and Video Generation",
-        "library_version": "0.2.0",
-        "engine_version": "0.77.4",
+        "library_version": "0.3.0",
+        "engine_version": "0.96.0",
         "tags": [
             "Griptape",
             "AI",

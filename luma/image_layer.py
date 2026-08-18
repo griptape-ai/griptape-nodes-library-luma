@@ -116,7 +116,7 @@ class LumaImageLayer(SuccessFailureNode):
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        errors = []
+        errors = super().validate_before_node_run() or []
 
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:

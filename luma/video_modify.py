@@ -164,7 +164,7 @@ class LumaVideoModify(SuccessFailureNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
-        errors = []
+        errors = super().validate_before_node_run() or []
 
         input_video = self.get_parameter_value("input_video")
         if not input_video:

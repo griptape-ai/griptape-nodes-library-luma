@@ -226,7 +226,7 @@ class LumaImageGeneration(SuccessFailureNode):
 
     def validate_before_node_run(self) -> list[Exception] | None:
         """Validate node configuration before execution."""
-        errors = []
+        errors = super().validate_before_node_run() or []
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:

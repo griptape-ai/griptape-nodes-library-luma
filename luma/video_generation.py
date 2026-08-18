@@ -260,7 +260,7 @@ class LumaVideoGeneration(SuccessFailureNode):
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        errors = []
+        errors = super().validate_before_node_run() or []
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:
@@ -274,8 +274,16 @@ class LumaVideoGeneration(SuccessFailureNode):
                 )
             )
 
-        if self.get_parameter_value("hdr") and self.get_parameter_value("resolution") == "540p":
+        hdr = self.get_parameter_value("hdr")
+        if hdr and self.get_parameter_value("resolution") not in {"720p", "1080p"}:
             errors.append(ValueError(f"{self.name}: HDR requires 720p or 1080p resolution."))
+
+        loop = self.get_parameter_value("loop")
+        duration = self.get_parameter_value("duration") or "5s"
+        if loop and duration == "10s":
+            errors.append(ValueError(f"{self.name}: Loop is not supported with 10s duration."))
+        if loop and hdr:
+            errors.append(ValueError(f"{self.name}: Loop is not supported with HDR."))
 
         mode = self.get_parameter_value("image_input_mode")
         if mode == "keyframes":
