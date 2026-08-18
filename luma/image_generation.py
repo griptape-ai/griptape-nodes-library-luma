@@ -18,7 +18,6 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
-from luma_utils.connection_utils import disconnect_param_list_incoming
 from luma_utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
@@ -203,7 +202,6 @@ class LumaImageGeneration(SuccessFailureNode):
         if mode == "image_reference":
             self.show_parameter_by_name(["image_refs"])
         else:  # "none"
-            disconnect_param_list_incoming(self, self._image_refs_list)
             self.hide_parameter_by_name(["image_refs"])
 
     def _build_image_ref_params(self) -> list[dict]:

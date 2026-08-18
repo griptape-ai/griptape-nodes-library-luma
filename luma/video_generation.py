@@ -18,7 +18,6 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
-from luma_utils.connection_utils import disconnect_incoming, disconnect_param_list_incoming
 from luma_utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
@@ -239,22 +238,14 @@ class LumaVideoGeneration(SuccessFailureNode):
 
     def _apply_image_input_mode(self, mode: str) -> None:
         if mode == "start_end_frame":
-            disconnect_param_list_incoming(self, self._keyframe_images_list)
-            disconnect_param_list_incoming(self, self._keyframe_indexes_list)
             self.show_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
         elif mode == "keyframes":
-            disconnect_incoming(self, "start_frame")
-            disconnect_incoming(self, "end_frame")
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.show_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.hide_parameter_by_name(["loop"])
         else:  # "none"
-            disconnect_incoming(self, "start_frame")
-            disconnect_incoming(self, "end_frame")
-            disconnect_param_list_incoming(self, self._keyframe_images_list)
-            disconnect_param_list_incoming(self, self._keyframe_indexes_list)
             self.hide_parameter_by_name(["start_frame", "end_frame"])
             self.hide_parameter_by_name(["keyframe_images", "keyframe_indexes"])
             self.show_parameter_by_name(["loop"])
