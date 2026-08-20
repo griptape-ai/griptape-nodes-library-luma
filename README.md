@@ -4,13 +4,15 @@ This library provides Griptape nodes for interacting with the [Luma Agents API](
 
 ## Features
 
-- **Image Generation**: Generate high-quality images using Luma's image models
-- **Video Generation**: Create videos using Luma's Ray models
+- **Image Generation**: Generate high-quality images from text prompts with optional style/content reference images
+- **Image Editing**: Edit an existing image using AI with a prompt and optional additional references
+- **Image Layering**: Decompose an image into semantic RGBA PNG layers
+- **Video Generation**: Create videos from text or images using Luma's Ray models
 - **Video Reframing**: Change aspect ratios and extend videos intelligently
 - **Video Modification**: Apply style transfer and prompt-based editing to videos
 - Async implementation for efficient processing
 - Support for various aspect ratios and resolutions
-- Image and video reference capabilities
+- Local image upload handled automatically via Griptape Cloud
 
 ## Installation
 
@@ -25,10 +27,34 @@ This library provides Griptape nodes for interacting with the [Luma Agents API](
 Generate images from text prompts with support for:
 
 - Text-to-image generation
-- Image references to guide a fresh generation
-- Image editing (modify an existing image)
+- Up to 9 reference images to guide style and content via `image_reference` mode
 - Multiple aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 21:9)
 - Two model options: `uni-1` (default) and `uni-1-max` (higher quality)
+- Output format: `jpeg` (default, smaller file size) or `png` (lossless)
+
+### Image Edit Node
+
+Edit a source image using Luma AI with support for:
+
+- Required source image (aspect ratio is derived from the source)
+- Optional text prompt to describe the desired edit
+- Up to 8 additional reference images to guide the edit
+- Two model options: `uni-1` (default) and `uni-1-max` (higher quality)
+- Output format: `jpeg` (default, smaller file size) or `png` (lossless)
+
+### Image Layer Node
+
+Decompose a source image into semantic RGBA PNG layers with support for:
+
+- Required source image
+- Optional text prompt to guide how layers are separated (max 500 characters)
+- Resolution control: `1k` or `2k` output layers
+- Returns 1–10 RGBA PNG layers, each exposed as an individual output
+- Layer metadata (label, description) logged to status output
+- Uses the `uni-1` model (the only model supporting the layering API)
+- Output is always PNG — RGBA transparency requires lossless format
+
+> **Note:** The layering API requires the `image_layering` capability grant on your Luma account.
 
 ### Video Generation Node
 
@@ -36,11 +62,13 @@ Generate videos from text prompts or images with support for:
 
 - Text-to-video generation
 - Image-to-video generation with start and end frames
+- Multi-keyframe anchoring — up to 64 anchor images with paired position indexes
+- HDR output (requires 720p or 1080p resolution)
 - The `ray-3.2` model
-- Multiple resolutions (360p, 540p, 720p, 1080p)
+- Multiple resolutions (360p draft, 540p, 720p, 1080p)
 - Duration control (5s or 10s)
 - Aspect ratios (1:1, 3:4, 4:3, 9:16, 16:9, 21:9)
-- Seamless looping
+- Seamless looping (start/end frame mode)
 
 ### Video Reframe Node
 
