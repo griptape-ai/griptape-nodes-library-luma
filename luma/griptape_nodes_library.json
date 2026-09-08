@@ -29,7 +29,10 @@
         ],
         "dependencies": {
             "pip_dependencies": [
-                "luma-agents"
+                "luma-agents>=0.4.0",
+                "requests>=2.32.0",
+                "pillow>=10.0.0",
+                "httpx>=0.27.0"
             ]
         }
     },
