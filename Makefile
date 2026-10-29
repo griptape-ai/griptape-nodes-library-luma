@@ -61,9 +61,9 @@ changelog/assert-committed:
 .PHONY: version/publish
 version/publish: ## Create and push git tags.
 	@git fetch --tags --force
-	@git tag "v$$(make version/get)"
+	@git tag "v$$($(MAKE) --no-print-directory version/get)"
 	@git tag stable -f
-	@git push origin "v$$(make version/get)"
+	@git push origin "v$$($(MAKE) --no-print-directory version/get)"
 	@git push -f origin stable
 
 .PHONY: deps/sync
