@@ -10,4 +10,4 @@ the `library_version` in `luma/griptape_nodes_library.json`.
 
 <!-- Entries go in changelog.d/, one file each. See changelog.d/README.md. -->
 
-[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-luma/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/griptape-ai/griptape-nodes-library-luma/compare/d93254ddcbbe70bce1cb384039a9d582d660a2dc...HEAD
