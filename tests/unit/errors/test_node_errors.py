@@ -218,6 +218,14 @@ def test_video_generation_keyframe_problems(with_key):
     ]
 
 
+def test_403_is_not_treated_as_a_refused_key(luma, with_key):
+    luma((403, {"detail": "Your plan does not include this model"}))
+    error = raised_by(make_node(*GEN))
+    assert str(error) == "Your plan does not include this model"
+    assert error.fields["status_code"] == 403
+    assert error.links == []
+
+
 def test_refused_key(luma, with_key):
     luma((401, {"detail": "Missing or invalid API key"}))
     error = raised_by(make_node(*GEN))

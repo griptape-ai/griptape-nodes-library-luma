@@ -8,7 +8,7 @@ that ends without a usable result.
 from __future__ import annotations
 
 from griptape_nodes.exe_types.core_types import NodeError
-from luma_agents import APIConnectionError
+from luma_agents import APIConnectionError, APIStatusError
 from luma_agents.types import Generation
 
 API_KEY_NAME = "LUMA_AGENTS_API_KEY"
@@ -30,7 +30,11 @@ def error_from_api_exception(error: Exception, *, generation_id: str | None = No
     if isinstance(error, APIConnectionError) and isinstance(cause, Exception):
         error = cause
     fields = {"generation_id": generation_id} if generation_id else None
-    return NodeError.from_request_exception(error, provider=PROVIDER, secret_name=API_KEY_NAME, fields=fields)
+    # Only a 401 is known to mean a refused key. A 403 reads as Luma's own reason unless the body says otherwise.
+    key_refused = error.status_code == 401 if isinstance(error, APIStatusError) else None
+    return NodeError.from_request_exception(
+        error, provider=PROVIDER, secret_name=API_KEY_NAME, key_refused=key_refused, fields=fields
+    )
 
 
 def generation_error(generation: Generation, message: str) -> NodeError:
