@@ -13,6 +13,8 @@ from griptape_nodes.common.parameter_hydration import hydrate_value
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.files.file import File
 
+from luma_utils.luma_errors import input_error
+
 
 def _is_public_url(url: str) -> bool:
     """Return True if url points at a non-local http/https host."""
@@ -51,7 +53,8 @@ def build_public_url_list(
                 continue
 
             if isinstance(img_value, ErrorArtifact):
-                raise RuntimeError(f"Parameter '{param_name}' contains an upstream error: {img_value.value}")
+                msg = f"'{param_name}' received an error from an upstream node: {img_value.value}"
+                raise input_error(msg, param_name)
 
             url = img_value.value if isinstance(img_value, UrlArtifact) else str(img_value)
 

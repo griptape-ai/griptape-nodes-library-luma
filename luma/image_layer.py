@@ -3,6 +3,7 @@ from typing import Any
 
 from griptape.artifacts import ImageUrlArtifact
 from griptape_nodes.exe_types.core_types import (
+    NodeError,
     Parameter,
     ParameterList,
     ParameterMode,
@@ -17,6 +18,13 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
+from luma_utils.luma_errors import (
+    error_from_api_exception,
+    generation_failed_error,
+    generation_timeout_error,
+    input_error,
+    missing_key_error,
+)
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
@@ -109,48 +117,34 @@ class LumaImageLayer(SuccessFailureNode):
     def _get_api_key(self) -> str:
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise ValueError(
-                f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://platform.lumalabs.ai"
-            )
+            raise missing_key_error()
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        errors = super().validate_before_node_run() or []
+        # A missing key is reported first and alone, so the Settings link is the only thing on the node header.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_key_error()]
 
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(
-                ValueError(
-                    f"{self.name}: Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
-                )
-            )
+        errors: list[Exception] = []
+        errors.extend(super().validate_before_node_run() or [])
 
-        source_image = self.get_parameter_value("source_image")
-        if not source_image:
-            errors.append(ValueError(f"{self.name}: A source image is required for layering."))
+        if not self.get_parameter_value("source_image"):
+            errors.append(input_error("Connect an image to 'Source Image'.", "source_image"))
 
         prompt = self.get_parameter_value("prompt") or ""
         if len(prompt) > MAX_PROMPT_LEN:
-            errors.append(
-                ValueError(f"{self.name}: Prompt exceeds {MAX_PROMPT_LEN} character limit ({len(prompt)} characters).")
-            )
+            msg = f"'Prompt' is limited to {MAX_PROMPT_LEN} characters. It has {len(prompt)}. Shorten it and run the node again."
+            errors.append(input_error(msg, "prompt"))
 
-        return errors if errors else None
-
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+        return errors or None
 
     async def aprocess(self) -> None:
         """Decompose image into semantic layers using Luma async API."""
         self._clear_execution_status()
         client = None
         try:
-            try:
-                api_key = self._get_api_key()
-                client = AsyncLuma(auth_token=api_key)
-            except Exception as e:
-                raise RuntimeError(f"Setup failed: {e}") from e
+            api_key = self._get_api_key()
+            client = AsyncLuma(auth_token=api_key)
 
             prompt = self.get_parameter_value("prompt") or ""
             resolution = self.get_parameter_value("resolution") or "1k"
@@ -165,9 +159,12 @@ class LumaImageLayer(SuccessFailureNode):
                     self.set_parameter_value("source_image", source_image_val)
                 source_url = self._public_source_parameter.get_public_url_for_parameter()
                 if not source_url:
-                    raise ValueError("Source image is required and could not be resolved to a URL.")
+                    raise input_error("Connect an image to 'Source Image'.", "source_image")
+            except NodeError:
+                raise
             except Exception as e:
-                raise RuntimeError(f"Failed to prepare source image: {e}") from e
+                msg = f"Could not prepare 'Source Image' for Luma: {e}"
+                raise input_error(msg, "source_image") from e
 
             self.append_value_to_parameter("status", "Creating layering request...\n")
 
@@ -187,7 +184,7 @@ class LumaImageLayer(SuccessFailureNode):
                 generation = await client.generations.create(**params)
                 generation_id = generation.id
             except Exception as e:
-                raise RuntimeError(f"API request failed: {e}") from e
+                raise error_from_api_exception(e) from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for layering to complete...\n")
@@ -204,18 +201,18 @@ class LumaImageLayer(SuccessFailureNode):
                 try:
                     generation = await client.generations.get(generation_id=generation_id)
                 except Exception as e:
-                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
+                    raise error_from_api_exception(e, generation_id=generation_id) from e
 
                 if generation.state == "completed":
                     completed = True
                     self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                    raise generation_failed_error(generation)
                 else:
                     self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
+                raise generation_timeout_error(generation, max_attempts * 2)
 
             # Sort layers by index and download each to the project file store
             sorted_outputs: list = []
@@ -241,7 +238,8 @@ class LumaImageLayer(SuccessFailureNode):
                     else:
                         self.append_value_to_parameter("status", f"Layer {i + 1}: saved\n")
             except Exception as e:
-                raise RuntimeError(f"Failed to save output layers: {e}") from e
+                msg = f"Could not download or save the layers Luma produced: {e}"
+                raise NodeError(msg, fields={"generation_id": generation_id}) from e
 
             self.append_value_to_parameter(
                 "status",

@@ -4,6 +4,7 @@ from typing import Any
 
 from griptape.artifacts import ImageUrlArtifact, VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
+    NodeError,
     Parameter,
     ParameterList,
     ParameterMode,
@@ -18,6 +19,14 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
+from luma_utils.luma_errors import (
+    error_from_api_exception,
+    generation_failed_error,
+    generation_timeout_error,
+    input_error,
+    missing_key_error,
+    no_output_error,
+)
 from luma_utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
 SERVICE = "Luma Labs"
@@ -253,51 +262,51 @@ class LumaVideoGeneration(SuccessFailureNode):
     def _get_api_key(self) -> str:
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise ValueError(
-                f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://platform.lumalabs.ai"
-            )
+            raise missing_key_error()
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        errors = super().validate_before_node_run() or []
+        # A missing key is reported first and alone, so the Settings link is the only thing on the node header.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_key_error()]
+
+        errors: list[Exception] = []
+        errors.extend(super().validate_before_node_run() or [])
 
         prompt = self.get_parameter_value("prompt")
         if not prompt:
-            errors.append(ValueError(f"{self.name}: Provide a prompt for video generation."))
-
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(
-                ValueError(
-                    f"{self.name}: Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
-                )
-            )
+            errors.append(input_error("Enter a prompt in 'Prompt'.", "prompt"))
 
         hdr = self.get_parameter_value("hdr")
         if hdr and self.get_parameter_value("resolution") not in {"720p", "1080p"}:
-            errors.append(ValueError(f"{self.name}: HDR requires 720p or 1080p resolution."))
+            errors.append(input_error("'HDR Output' needs 'Resolution' set to 720p or 1080p.", "hdr"))
 
         loop = self.get_parameter_value("loop")
         duration = self.get_parameter_value("duration") or "5s"
         if loop and duration == "10s":
-            errors.append(ValueError(f"{self.name}: Loop is not supported with 10s duration."))
+            errors.append(
+                input_error("'Loop Video' is not supported with a 10s 'Duration'. Choose 5s or turn Loop off.", "loop")
+            )
         if loop and hdr:
-            errors.append(ValueError(f"{self.name}: Loop is not supported with HDR."))
+            errors.append(input_error("'Loop Video' is not supported with 'HDR Output'. Turn one of them off.", "loop"))
 
         mode = self.get_parameter_value("image_input_mode")
         if mode == "keyframes":
             image_count = len(self._keyframe_images_list.get_child_parameters())
             index_count = len(self._keyframe_indexes_list.get_child_parameters())
             if image_count == 0:
-                errors.append(ValueError(f"{self.name}: Add at least one keyframe image when using keyframes mode."))
-            elif image_count != index_count:
                 errors.append(
-                    ValueError(
-                        f"{self.name}: Keyframe Images ({image_count}) and Keyframe Indexes ({index_count}) "
-                        "must have the same number of items."
+                    input_error(
+                        "Add at least one image to 'Keyframe Images' when 'Image Input' is keyframes.",
+                        "keyframe_images",
                     )
                 )
+            elif image_count != index_count:
+                msg = (
+                    f"'Keyframe Images' has {image_count} items and 'Keyframe Indexes' has {index_count}. "
+                    "Give both lists the same number of items."
+                )
+                errors.append(input_error(msg, "keyframe_indexes"))
             else:
                 index_children = self._keyframe_indexes_list.get_child_parameters()
                 index_values = [
@@ -310,41 +319,33 @@ class LumaVideoGeneration(SuccessFailureNode):
                     dupes: set[int] = set()
                     for v in index_values:
                         (dupes if v in seen else seen).add(v)
-                    errors.append(
-                        ValueError(f"{self.name}: Keyframe indexes must be unique. Duplicates: {sorted(dupes)}.")
-                    )
+                    msg = f"'Keyframe Indexes' must be unique. These repeat: {sorted(dupes)}."
+                    errors.append(input_error(msg, "keyframe_indexes"))
 
                 # Range check (24 fps: 5 s → 0–120, 10 s → 0–240)
                 duration = self.get_parameter_value("duration") or "5s"
                 max_index = 120 if duration == "5s" else 240
                 out_of_range = [v for v in index_values if not (0 <= v <= max_index)]
                 if out_of_range:
-                    errors.append(
-                        ValueError(
-                            f"{self.name}: Keyframe index values must be 0–{max_index} for a {duration} video. "
-                            f"Out of range: {sorted(out_of_range)}."
-                        )
+                    msg = (
+                        f"'Keyframe Indexes' must be between 0 and {max_index} for a {duration} video. "
+                        f"These are out of range: {sorted(out_of_range)}."
                     )
+                    errors.append(input_error(msg, "keyframe_indexes"))
 
-        return errors if errors else None
-
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+        return errors or None
 
     async def aprocess(self) -> None:
         """Generate video using Luma async API."""
         self._clear_execution_status()
         client = None
         try:
-            try:
-                api_key = self._get_api_key()
-                client = AsyncLuma(auth_token=api_key)
-            except Exception as e:
-                raise RuntimeError(f"Setup failed: {e}") from e
+            api_key = self._get_api_key()
+            client = AsyncLuma(auth_token=api_key)
 
             prompt = self.get_parameter_value("prompt")
             if not prompt:
-                raise ValueError("Prompt is required and cannot be empty")
+                raise input_error("Enter a prompt in 'Prompt'.", "prompt")
 
             model = self.get_parameter_value("model")
             aspect_ratio = self.get_parameter_value("aspect_ratio")
@@ -395,8 +396,11 @@ class LumaVideoGeneration(SuccessFailureNode):
                     # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     try:
                         start_frame_url = self._public_start_frame_parameter.get_public_url_for_parameter()
+                    except NodeError:
+                        raise
                     except Exception as e:
-                        raise RuntimeError(f"Failed to prepare start frame: {e}") from e
+                        msg = f"Could not prepare 'Start Frame' for Luma: {e}"
+                        raise input_error(msg, "start_frame") from e
                     if start_frame_url:
                         video_options["start_frame"] = {"url": start_frame_url}
                         self.append_value_to_parameter("status", f"Using start frame: {start_frame_url}\n")
@@ -410,8 +414,11 @@ class LumaVideoGeneration(SuccessFailureNode):
                     # Let PublicArtifactUrlParameter handle getting and converting the artifact
                     try:
                         end_frame_url = self._public_end_frame_parameter.get_public_url_for_parameter()
+                    except NodeError:
+                        raise
                     except Exception as e:
-                        raise RuntimeError(f"Failed to prepare end frame: {e}") from e
+                        msg = f"Could not prepare 'End Frame' for Luma: {e}"
+                        raise input_error(msg, "end_frame") from e
                     if end_frame_url:
                         video_options["end_frame"] = {"url": end_frame_url}
                         self.append_value_to_parameter("status", f"Using end frame: {end_frame_url}\n")
@@ -419,8 +426,11 @@ class LumaVideoGeneration(SuccessFailureNode):
             elif mode == "keyframes":
                 try:
                     keyframes, keyframe_indexes = self._build_keyframe_params()
+                except NodeError:
+                    raise
                 except Exception as e:
-                    raise RuntimeError(f"Failed to prepare keyframes: {e}") from e
+                    msg = f"Could not prepare 'Keyframe Images' for Luma: {e}"
+                    raise input_error(msg, "keyframe_images") from e
                 if keyframes:
                     video_options["keyframes"] = keyframes
                     video_options["keyframe_indexes"] = keyframe_indexes
@@ -439,7 +449,7 @@ class LumaVideoGeneration(SuccessFailureNode):
                 generation = await client.generations.create(**params)
                 generation_id = generation.id
             except Exception as e:
-                raise RuntimeError(f"API request failed: {e}") from e
+                raise error_from_api_exception(e) from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
             self.append_value_to_parameter("status", "Waiting for generation to complete...\n")
@@ -456,20 +466,22 @@ class LumaVideoGeneration(SuccessFailureNode):
                 try:
                     generation = await client.generations.get(generation_id=generation_id)
                 except Exception as e:
-                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
+                    raise error_from_api_exception(e, generation_id=generation_id) from e
 
                 if generation.state == "completed":
                     completed = True
                     self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(f"Generation failed: {generation.failure_reason}")
+                    raise generation_failed_error(generation)
                 else:
                     self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(f"Generation timed out after {max_attempts} attempts")
+                raise generation_timeout_error(generation, max_attempts * 3)
 
             # Download and save video from the generation output list
+            if not generation.output:
+                raise no_output_error(generation)
             video_url = ""
             try:
                 video_url = generation.output[0].url
@@ -482,7 +494,8 @@ class LumaVideoGeneration(SuccessFailureNode):
                 self.parameter_output_values["video"] = video_artifact
                 self.publish_update_to_parameter("video", video_artifact)
             except Exception as e:
-                raise RuntimeError(f"Failed to save output: {e}") from e
+                msg = f"Could not download or save the file Luma produced: {e}"
+                raise NodeError(msg, fields={"generation_id": generation_id}) from e
 
             self.append_value_to_parameter(
                 "status",
