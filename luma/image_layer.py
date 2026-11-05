@@ -20,8 +20,8 @@ from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
 from luma_utils.luma_errors import (
     error_from_api_exception,
+    generation_error,
     generation_failed_error,
-    generation_timeout_error,
     input_error,
     missing_key_error,
 )
@@ -212,7 +212,10 @@ class LumaImageLayer(SuccessFailureNode):
                     self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise generation_timeout_error(generation, max_attempts * 2)
+                raise generation_error(
+                    generation,
+                    f"Luma was still working after {max_attempts * 2} seconds, so the node stopped waiting. Run the node again, or try a simpler request.",
+                )
 
             # Sort layers by index and download each to the project file store
             sorted_outputs: list = []

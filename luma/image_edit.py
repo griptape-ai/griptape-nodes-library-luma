@@ -21,11 +21,10 @@ from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
 from luma_utils.luma_errors import (
     error_from_api_exception,
+    generation_error,
     generation_failed_error,
-    generation_timeout_error,
     input_error,
     missing_key_error,
-    no_output_error,
 )
 from luma_utils.public_url_utils import build_public_url_list, cleanup_uploaded_paths
 
@@ -285,11 +284,17 @@ class LumaImageEdit(SuccessFailureNode):
                     self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise generation_timeout_error(generation, max_attempts * 2)
+                raise generation_error(
+                    generation,
+                    f"Luma was still working after {max_attempts * 2} seconds, so the node stopped waiting. Run the node again, or try a simpler request.",
+                )
 
             # Get image URL from the generation output list
             if not generation.output:
-                raise no_output_error(generation)
+                raise generation_error(
+                    generation,
+                    "Luma reported the generation as completed but returned no output file. Run the node again.",
+                )
             image_url = ""
             try:
                 image_url = generation.output[0].url
