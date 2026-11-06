@@ -534,7 +534,9 @@ class LumaVideoGeneration(SuccessFailureNode):
                 idx_value = self.get_parameter_value(idx_param.name)
                 valid_indexes.append(int(idx_value) if idx_value is not None else 0)
 
-        keyframes, self._keyframe_uploaded_paths = build_public_url_list(self, valid_image_names, storage_driver)
+        keyframes, self._keyframe_uploaded_paths = build_public_url_list(
+            self, valid_image_names, storage_driver, list_name="keyframe_images", list_label="Keyframe Images"
+        )
         return keyframes, valid_indexes
 
     def _cleanup_keyframe_uploads(self) -> None:

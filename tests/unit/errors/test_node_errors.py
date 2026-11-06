@@ -280,3 +280,43 @@ def test_failure_follows_wired_failed_output(luma, with_key):
     run(node, failed_wired=True)
     assert node.parameter_output_values["was_successful"] is False
     assert "Luma refused the API key" in node.parameter_output_values["result_details"]
+
+
+@pytest.mark.parametrize(
+    ("class_name", "file_name", "list_attr", "set_up", "label", "list_name"),
+    [
+        (
+            "LumaImageGeneration",
+            "image_generation.py",
+            "_image_refs_list",
+            {"reference_type": "image_reference"},
+            "Reference Images",
+            "image_refs",
+        ),
+        ("LumaImageEdit", "image_edit.py", "_image_refs_list", {}, "Additional References", "image_refs"),
+        (
+            "LumaVideoGeneration",
+            "video_generation.py",
+            "_keyframe_images_list",
+            {"image_input_mode": "keyframes"},
+            "Keyframe Images",
+            "keyframe_images",
+        ),
+    ],
+)
+def test_upstream_error_in_a_list_names_the_list_not_the_child_id(
+    class_name, file_name, list_attr, set_up, label, list_name, with_key
+):
+    from griptape.artifacts import ErrorArtifact
+
+    node = make_node(class_name, file_name, **set_up)
+    getattr(node, list_attr).add_child_parameter()
+    child = getattr(node, list_attr).get_child_parameters()[0]
+    assert "ParameterListUniqueParamID" in child.name
+    node.parameter_values[child.name] = ErrorArtifact("upstream blew up")
+    if class_name == "LumaVideoGeneration":
+        node._keyframe_indexes_list.add_child_parameter()
+    error = raised_by(node)
+    assert str(error) == f"An image connected to '{label}' comes from a node that failed: upstream blew up"
+    assert "ParameterListUniqueParamID" not in str(error)
+    assert error.fields == {"parameter": list_name}

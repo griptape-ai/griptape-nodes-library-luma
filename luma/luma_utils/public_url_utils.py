@@ -28,8 +28,13 @@ def build_public_url_list(
     node: BaseNode,
     param_names: list[str],
     storage_driver: Any,
+    *,
+    list_name: str,
+    list_label: str,
 ) -> tuple[list[dict], list[Path]]:
     """Resolve a list of image parameters to public URLs, uploading local ones to GTC.
+
+    list_name and list_label name the ParameterList in errors, since its child names are internal IDs.
 
     Iterates param_names in order, skipping any that resolve to None. For each valid
     value, if the URL is local it is uploaded via storage_driver so the Luma API can
@@ -53,8 +58,8 @@ def build_public_url_list(
                 continue
 
             if isinstance(img_value, ErrorArtifact):
-                msg = f"'{param_name}' received an error from an upstream node: {img_value.value}"
-                raise input_error(msg, param_name)
+                msg = f"An image connected to '{list_label}' comes from a node that failed: {img_value.value}"
+                raise input_error(msg, list_name)
 
             url = img_value.value if isinstance(img_value, UrlArtifact) else str(img_value)
 

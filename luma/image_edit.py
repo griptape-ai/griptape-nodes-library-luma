@@ -172,7 +172,9 @@ class LumaImageEdit(SuccessFailureNode):
         """Build image_ref array for the Luma API, uploading local images as needed."""
         param_names = [p.name for p in self._image_refs_list.get_child_parameters()]
         storage_driver = self._public_source_parameter._storage_driver
-        refs, self._image_ref_uploaded_paths = build_public_url_list(self, param_names, storage_driver)
+        refs, self._image_ref_uploaded_paths = build_public_url_list(
+            self, param_names, storage_driver, list_name="image_refs", list_label="Additional References"
+        )
         return refs
 
     def _cleanup_image_ref_uploads(self) -> None:
