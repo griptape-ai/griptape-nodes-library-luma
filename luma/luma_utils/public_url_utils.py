@@ -13,6 +13,8 @@ from griptape_nodes.common.parameter_hydration import hydrate_value
 from griptape_nodes.exe_types.node_types import BaseNode
 from griptape_nodes.files.file import File
 
+from luma_utils.luma_errors import input_error
+
 
 def _is_public_url(url: str) -> bool:
     """Return True if url points at a non-local http/https host."""
@@ -26,8 +28,13 @@ def build_public_url_list(
     node: BaseNode,
     param_names: list[str],
     storage_driver: Any,
+    *,
+    list_name: str,
+    list_label: str,
 ) -> tuple[list[dict], list[Path]]:
     """Resolve a list of image parameters to public URLs, uploading local ones to GTC.
+
+    list_name and list_label name the ParameterList in errors, since its child names are internal IDs.
 
     Iterates param_names in order, skipping any that resolve to None. For each valid
     value, if the URL is local it is uploaded via storage_driver so the Luma API can
@@ -51,7 +58,8 @@ def build_public_url_list(
                 continue
 
             if isinstance(img_value, ErrorArtifact):
-                raise RuntimeError(f"Parameter '{param_name}' contains an upstream error: {img_value.value}")
+                msg = f"An image connected to '{list_label}' comes from a node that failed: {img_value.value}"
+                raise input_error(msg, list_name)
 
             url = img_value.value if isinstance(img_value, UrlArtifact) else str(img_value)
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from griptape.artifacts import VideoUrlArtifact
 from griptape_nodes.exe_types.core_types import (
+    NodeError,
     Parameter,
     ParameterGroup,
     ParameterMode,
@@ -18,6 +19,13 @@ from griptape_nodes.files.file import File
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
 from griptape_nodes.traits.options import Options
 from luma_agents import AsyncLuma
+from luma_utils.luma_errors import (
+    error_from_api_exception,
+    generation_error,
+    generation_failed_error,
+    input_error,
+    missing_key_error,
+)
 
 SERVICE = "Luma Labs"
 API_KEY_ENV_VAR = "LUMA_AGENTS_API_KEY"
@@ -158,46 +166,31 @@ class LumaVideoReframe(SuccessFailureNode):
         self._create_status_parameters()
 
     def _get_api_key(self) -> str:
-        """Retrieve the Luma API key from configuration."""
         api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
         if not api_key:
-            raise ValueError(
-                f"Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable.\n"
-                "Get your API key from: https://platform.lumalabs.ai"
-            )
+            raise missing_key_error()
         return api_key
 
     def validate_before_node_run(self) -> list[Exception] | None:
-        """Validate node configuration before execution."""
-        errors = super().validate_before_node_run() or []
+        # A missing key is reported first and alone, so the Settings link is the only thing on the node header.
+        if not GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR):
+            return [missing_key_error()]
 
-        input_video = self.get_parameter_value("input_video")
-        if not input_video:
-            errors.append(ValueError(f"{self.name}: Provide an input video to reframe."))
+        errors: list[Exception] = []
+        errors.extend(super().validate_before_node_run() or [])
 
-        api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_ENV_VAR)
-        if not api_key:
-            errors.append(
-                ValueError(
-                    f"{self.name}: Luma API key not found. Please set the {API_KEY_ENV_VAR} environment variable."
-                )
-            )
+        if not self.get_parameter_value("input_video"):
+            errors.append(input_error("Connect a video to 'Input Video'.", "input_video"))
 
-        return errors if errors else None
-
-    def validate_before_workflow_run(self) -> list[Exception] | None:
-        return self.validate_before_node_run()
+        return errors or None
 
     async def aprocess(self) -> None:
         """Reframe video using Luma async API."""
         self._clear_execution_status()
         client = None
         try:
-            try:
-                api_key = self._get_api_key()
-                client = AsyncLuma(auth_token=api_key)
-            except Exception as e:
-                raise RuntimeError(f"Setup failed: {e}") from e
+            api_key = self._get_api_key()
+            client = AsyncLuma(auth_token=api_key)
 
             # Convert serialized dict back to artifact if needed
             input_video = self.get_parameter_value("input_video")
@@ -210,10 +203,13 @@ class LumaVideoReframe(SuccessFailureNode):
             # Let PublicArtifactUrlParameter handle getting and converting the artifact
             try:
                 video_url = self._public_input_video_parameter.get_public_url_for_parameter()
+            except NodeError:
+                raise
             except Exception as e:
-                raise RuntimeError(f"Failed to prepare input video: {e}") from e
+                msg = f"Could not prepare 'Input Video' for Luma: {e}"
+                raise input_error(msg, "input_video") from e
             if not video_url:
-                raise ValueError("Input video is required")
+                raise input_error("Connect a video to 'Input Video'.", "input_video")
 
             model = self.get_parameter_value("model")
             aspect_ratio = self.get_parameter_value("aspect_ratio")
@@ -253,7 +249,7 @@ class LumaVideoReframe(SuccessFailureNode):
                 generation = await client.generations.create(**params)
                 generation_id = generation.id
             except Exception as e:
-                raise RuntimeError(f"API request failed: {e}") from e
+                raise error_from_api_exception(e) from e
 
             self.append_value_to_parameter("status", f"Request created with ID: {generation_id}\n")
 
@@ -271,20 +267,28 @@ class LumaVideoReframe(SuccessFailureNode):
                 try:
                     generation = await client.generations.get(generation_id=generation_id)
                 except Exception as e:
-                    raise RuntimeError(f"Polling error (attempt {attempt}): {e}") from e
+                    raise error_from_api_exception(e, generation_id=generation_id) from e
 
                 if generation.state == "completed":
                     completed = True
                     self.append_value_to_parameter("status", f"Attempt {attempt}: Completed!\n")
                 elif generation.state == "failed":
-                    raise RuntimeError(f"Reframe failed: {generation.failure_reason}")
+                    raise generation_failed_error(generation)
                 else:
                     self.append_value_to_parameter("status", f"Attempt {attempt}: {generation.state}\n")
 
             if not completed:
-                raise TimeoutError(f"Reframe timed out after {max_attempts} attempts")
+                raise generation_error(
+                    generation,
+                    f"Luma was still working after {max_attempts * 3} seconds, so the node stopped waiting. Run the node again, or try a simpler request.",
+                )
 
             # Get video URL from the generation output list
+            if not generation.output:
+                raise generation_error(
+                    generation,
+                    "Luma reported the generation as completed but returned no output file. Run the node again.",
+                )
             output_video_url = ""
             try:
                 output_video_url = generation.output[0].url
@@ -297,7 +301,8 @@ class LumaVideoReframe(SuccessFailureNode):
                 self.parameter_output_values["output_video"] = video_artifact
                 self.publish_update_to_parameter("output_video", video_artifact)
             except Exception as e:
-                raise RuntimeError(f"Failed to save output: {e}") from e
+                msg = f"Could not download or save the file Luma produced: {e}"
+                raise NodeError(msg, fields={"generation_id": generation_id}) from e
 
             self.append_value_to_parameter(
                 "status",
